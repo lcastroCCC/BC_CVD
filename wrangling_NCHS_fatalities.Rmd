@@ -35,20 +35,12 @@ mort <- mort %>%
          `Marital Status`,
          `Current Data Year` # Year of death
          ) %>%
-  mutate(across(c(`ICD Code (10th Revision)`, `1st Condition`, `2nd Condition`, `3rd Condition`), ~ sub("^(.{3})(.)", "\\1.\\2", .))) %>%
-  # Insert a period after the third character for any 4-character string in `1st Condition`
-  select(-c(`Record Type`,
-         `Detail Age Unit`,))
+  mutate(across(c(`ICD Code (10th Revision)`, `1st Condition`, `2nd Condition`, `3rd Condition`), ~ sub("^(.{3})(.)", "\\1.\\2", .))) %>% # Insert a period after the third character for any 4-character string in `1st Condition`
+  mutate(bcAny = ifelse(grepl("^C(50)", `1st Condition`)|
+           grepl("^C(50)", `2nd Condition`)|
+           grepl("^C(50)", `3rd Condition`), TRUE, FALSE), # Diagnosis in any level
+         sameLead = `ICD Code (10th Revision)` == `1st Condition`) # Variable that checks if ICD 10 and 1st Condition are the same
 
-# Data wrangling
-
-## Variable that could be useful: diagnosis in any level
-### Also variable that checks if ICD 10 and 1st Condition are the same
-mort <- mort %>%
-  mutate(bcAny = ifelse(grepl("^C(50[0-9])", `1st Condition`)|
-           grepl("^C(50[0-9])", `2nd Condition`)|
-           grepl("^C(50[0-9])", `3rd Condition`), TRUE, FALSE),
-         sameLead = `ICD Code (10th Revision)` == mort$`1st Condition`)
 
 # Underlying causes of death present
 sort(unique(mort$`ICD Code (10th Revision)`))
@@ -59,7 +51,7 @@ head(sort(table(mort$`ICD Code (10th Revision)`), decreasing = TRUE), 5)
 # Alzheimer test ----------
 # Filtering using ICD 10 variable
 test <- mort %>%
-  filter(grepl("^G(30[0-9])", `ICD Code (10th Revision)`))
+  filter(grepl("^G(30)", `ICD Code (10th Revision)`))
 #Codes included check
 table(test$`ICD Code (10th Revision)`)
 reportN <- 2627 #NVSR number of deaths
@@ -68,14 +60,18 @@ nrow(test)/reportN*100
 
 # Filtering using 1st condition
 test2 <- mort %>%
-  filter(grepl("^G(30[0-9])", `1st Condition`))
+  filter(grepl("^G(30)", `1st Condition`))
+#Codes included check
+table(test$`ICD Code (10th Revision)`)
 nrow(test2) - reportN # Difference in N between report and my analysis
 nrow(test2)/reportN*100
 
 # CVD test -----------
 # Filtering
 test <- mort %>%
-  filter(grepl("^I(00|0[1-9]|11|13|2[0-9]|3[0-9]|4[0-9]|50|51)", `ICD Code (10th Revision)`))
+ # filter(grepl("^I(00|0[1-9]|11|13|2[0-9]|3[0-9]|4[0-9]|50|51)", `ICD Code (10th Revision)`))
+  filter(grepl("^I(0|11|13|2|3|4|50|51)", `ICD Code (10th Revision)`))
+
 #Codes included check
 table(test$`ICD Code (10th Revision)`)
 reportN <- 5565 #NVSR number of deaths
@@ -83,7 +79,7 @@ nrow(test) - reportN # Difference in N between report and my analysis
 nrow(test)/reportN*100
 
 test2 <- mort %>%
-   filter(grepl("^I(00|0[1-9]|11|13|2[0-9]|3[0-9]|4[0-9]|50|51)", `1st Condition`))
+   filter(grepl("^I(0|11|13|2|3|4|50|51)",, `1st Condition`))
 table(test2$`1st Condition`)
 nrow(test2) - reportN # Difference in N between report and my analysis
 nrow(test2)/reportN*100
@@ -96,12 +92,32 @@ cvd <- mort %>%
          `Detail Age Unit` == 1, # Age in years
          `Detail Age` >= 18, # 18 years +
          `Sex` == "F", # Female
-          grepl("^I(00|0[1-9]|1[1-3]|2[0-9]|3[0-9]|4[0-9]|50|51|60|6[1-9]|7[0-8])", `1st Condition`),
+          grepl("^I(00|0[1-9]|1[1,3]|2[0-9]|3[0-9]|4[0-9]|50|51|60|6[1-9]|7[0-8])", `1st Condition`),
          !grepl("^C(50[0-9])", `2nd Condition`)|
-         !grepl("^C(50[0-9])", `3rd Condition`)) # Excluding BC fatalities
+         !grepl("^C(50[0-9])", `3rd Condition`)) %>% # Excluding BC fatalities 
+  select(-c(`Record Type`,
+         `Detail Age Unit`,))
+
 
 table(cvd$`1st Condition`) # Confirming which ICD 10 codes show up
 
+# Confirming correct set of ICD codes
+test <- mort %>%
+  filter(`Record Type` == 1, # Resident of P.R.
+         `Detail Age Unit` == 1, # Age in years
+         `Detail Age` >= 18, # 18 years +
+         `Sex` == "F", # Female
+          grepl("^I(00|0[1-9]|1[1,3]|2[0-9]|3[0-9]|4[0-9]|50|51|60|6[1-9]|7[0-8])", `1st Condition`))
+         
+cat(sort(unique(test$`1st Condition`)), sep = " ")
+test <- mort %>%
+  filter(`Record Type` == 1, # Resident of P.R.
+         `Detail Age Unit` == 1, # Age in years
+         `Detail Age` >= 18, # 18 years +
+         `Sex` == "F", # Female
+          !grepl("^I(00|0[1-9]|1[1,3]|2[0-9]|3[0-9]|4[0-9]|50|51|60|6[1-9]|7[0-8])", `1st Condition`))
+         
+sort(unique(test$`1st Condition`))
 # CVD excluding all cancer related deaths
 cvd <- mort %>%
   filter(`Record Type` == 1, # Resident of P.R.
@@ -110,7 +126,9 @@ cvd <- mort %>%
          `Sex` == "F", # Female
           grepl("^I(0[0-9]|1[1,3]|2[0-9]|3[0-9]|4[0-9]|50|51|6[0-9]|7[0-8])\\b", `1st Condition`),
          !grepl("^C(50[0-9])", `2nd Condition`)|
-         !grepl("^C(50[0-9])", `3rd Condition`)) # Excluding BC fatalities
+         !grepl("^C(50[0-9])", `3rd Condition`)) %>% # Excluding BC fatalities
+  select(-c(`Record Type`,
+         `Detail Age Unit`,))
 
 # Testing
 cvdtest <- mort %>%
