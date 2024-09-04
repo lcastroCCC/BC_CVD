@@ -1,0 +1,839 @@
+---
+title: "Project: Cardiac death mortality on breast cancer patients (Dr. C Sanchez)"
+author: "Edwin Navarro - BBC Biostatistician"
+date: "2024-06-19"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Working Directory -------------------------------------------------------
+
+setwd("C:/Users/enavarro/Documents/BBC/Project- Dra. Carola/Data")
+#setwd("C:/Users/gabri/OneDrive/Documents/CCC/Project Dra. CSanchez/Data")
+
+# Libraries ---------------------------------------------------------------
+
+library(knitr)
+library(dplyr)
+library(survival)
+library(ggplot2)
+library(tibble)
+
+library(lubridate)
+library(ggsurvfit)
+library(gtsummary)
+library(tidycmprsk)
+
+library(tidyr)
+library(openxlsx)
+library(knitr)
+library(kableExtra)
+library(RColorBrewer)
+
+
+```
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Data --------------------------------------------------------------------
+
+data <- read.xlsx('C:/Users/enavarro/Documents/BBC/Project- Dra. Carola/Data/datosCarola_invasive_seq0&1_NoID.xlsx',sheet = 1)
+
+#data <- read.xlsx('C:/Users/gabri/OneDrive/Documents/CCC/Project Dra. #CSanchez/Data/datosCarola_invasive_seq0&1_NoID.xlsx',sheet = 1)
+
+# ER Assay, PR Assay & HER2 
+# Reference links for encoding in data dictionary document
+data <- data %>%
+  mutate(ER = ifelse(ERassay  %in% c('1','010'), 'Positive', 
+                     ifelse(ERassay %in% c('0','020'),'Negative',
+                            ifelse(ERassay %in% c('999',NA,'9'), 'Unknown','Other'
+                            ))),
+         PR = ifelse(PRassay  %in% c('1','010'), 'Positive', 
+                     ifelse(PRassay %in% c('0','020'),'Negative',
+                            ifelse(PRassay %in% c('999',NA,'9'), 'Unknown','Other'
+                            ))),
+         HER2.cat = ifelse(HER2  %in% c('1','010'), 'Positive', 
+                     ifelse(HER2 %in% c('0','020'),'Negative',
+                            ifelse(HER2 %in% c('999',NA,'9'), 'Unknown','Other'
+                            )))
+         
+  )
+data$ER <- factor(data$ER, 
+                       levels = c('Positive','Negative',
+                                  'Other','Unknown'))
+data$PR <- factor(data$PR, 
+                       levels = c('Positive','Negative',
+                                  'Other','Unknown'))
+data$HER2.cat <- factor(data$HER2.cat, 
+                       levels = c('Positive','Negative',
+                                  'Other','Unknown'))
+
+#Age Variable is character (set to numeric)
+data$AgeDx <- as.numeric(data$AgeDx)
+
+#Age Group Categories
+data$AgeCat <- cut(data$AgeDx, breaks = c(0,17,59, 888,999), include.lowest = TRUE,
+                   labels = c('0-17','18-59', '60+', 'Unknown'))
+
+#Set factor order for Stage at Diagnosis
+data$StageAtDx <- relevel(factor(data$StageAtDx), ref = "Localized")
+
+# Procedures
+
+data <- data %>% 
+  mutate(Procedure = ifelse(Surgery == 'Yes' & Chemotherapy != 'Yes' & Radiotherapy != 'Yes',
+                         'Surgery Only', 
+                 ifelse(Surgery != 'Yes' & Chemotherapy == 'Yes' & Radiotherapy != 'Yes',
+                        'Chemotherapy Only',
+                 ifelse(Surgery != 'Yes' & Chemotherapy != 'Yes' & Radiotherapy == 'Yes',
+                        'Radiotheraphy Only',
+                 ifelse(Surgery == 'Yes' & Chemotherapy == 'Yes' & Radiotherapy == 'Yes',
+                        'Surgery + Chemotherapy + Radiotherapy',
+                 ifelse(Surgery == 'Yes' & Chemotherapy == 'Yes' & Radiotherapy != 'Yes',
+                        'Surgery + Chemotherapy',
+                 ifelse(Surgery == 'Yes' & Chemotherapy != 'Yes' & Radiotherapy == 'Yes',
+                        'Surgery + Radiotherapy',
+                 ifelse(Surgery != 'Yes' & Chemotherapy == 'Yes' & Radiotherapy == 'Yes',
+                        'Chemotherapy + Radiotherapy',
+                 ifelse(Surgery == 'Unk' & Chemotherapy == 'Unk' & Radiotherapy == 'Unk',
+                        'Unknown',
+                 ifelse(Surgery == 'No' & Chemotherapy == 'No' & Radiotherapy == 'No',
+                        'No treatment','No treatment'
+                        )))))))))
+)
+data$Procedure <- with(data, factor(Procedure, 
+                                    levels = c('Surgery + Chemotherapy + Radiotherapy',
+                                               'Surgery + Radiotherapy','Surgery + Chemotherapy',
+                                               'Chemotherapy + Radiotherapy',
+                                               'Surgery Only','Chemotherapy Only', 
+                                               'Radiotheraphy Only','No treatment','Unknown'))
+)
+
+# CVD vs Non CVD death
+data$Vital <- ifelse(data$VitalStatus == 0 & data$CVDDeathCause == 'CVD death','CVD death', 
+                     ifelse(data$VitalStatus == 0 & data$BCDeathCause == 'BC death', 'BC death', 
+                            ifelse(data$VitalStatus == 0, 'Other Death', 'Alive'
+                            )))
+
+# time: Delta year of diagnosis and year follow up (year of death if vital status == 0) 
+# Vital Status: 1 = Alive, 0 = dead
+
+# Recode status to 1 event (CVD death) and 0 censored
+data$status <- ifelse(data$VitalStatus == 0 & data$CVDDeathCause == 'CVD death',1, 0)
+data$status <- as.factor(data$status)
+
+```
+
+### **I. Research Objective:** 
+
+Assess mortality on breast cancer survivors caused by cardiovascular disease (CVD) in women older than 17 years of age residing in Puerto Rico that are diagnosed with breast cancer (by microscopic confirmation) during the period of 2004-2019. 
+
+#### <ins> A. Datasets (available at the moment):</ins> 
+
+Cancer Registry Data: The initial selection is all women residents in PR diagnosed with breast cancer (by microscopic confirmation) during the period 2005-2019. 
+
+#### <ins> B. Analysis Proposal: </ins>
+
+Below is the overall proposed analysis strategy to meet the study objectives: 
+
+1. Descriptive characteristics of the study population 
+
+2. Estimate Standardized Mortality Ratios (SMR’s) with confidence intervals (Poisson-based CI’s) on the study population. Proposed SMR definition: observed number of CVD deaths among breast cancer patients divided by the expected number of CVD deaths in the matched general female population in PR.  
+
+3. Estimate Cumulative Incidence of Death (Cumulative Mortality) considering the effects of competing risks (Cardiac-related death vs Other/Breast Cancer-related death).
+
+### **II. Descriptive Analysis**
+
+#### <ins> A. Summary Counts </ins>
+
+*Table 1: Baseline Characteristics of Study Population* 
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# Descriptive Analysis ----------------------------------------------------
+
+# Overall Count
+tab1 <- as.tibble(xtabs(~Procedure, data))
+tab1$Group <- 'Treatment'
+colnames(tab1) <- c('Variable', 'Freq', 'Group')
+tab2 <- as.tibble(xtabs(~StageAtDx, data))
+tab2$Group <- 'Stage at Diagnosis'
+colnames(tab2) <- c('Variable', 'Freq', 'Group')
+tab3 <- as.tibble(xtabs(~AgeCat, data))
+tab3$Group <- 'Age at Diagnosis'
+colnames(tab3) <- c('Variable', 'Freq', 'Group')
+tab4 <- as.tibble(xtabs(~ER, data))
+tab4$Group <- 'ER Assay'
+colnames(tab4) <- c('Variable', 'Freq', 'Group')
+tab5 <- as.tibble(xtabs(~PR, data))
+tab5$Group <- 'PR Assay'
+colnames(tab5) <- c('Variable', 'Freq', 'Group')
+tab6 <- as.tibble(xtabs(~HER2.cat, data))
+tab6$Group <- 'HER2'
+colnames(tab6) <- c('Variable', 'Freq', 'Group')
+
+tab1 <- tab1%>%
+  bind_rows(tab2,tab3,tab4,tab5,tab6)
+  
+rm(tab2);rm(tab3);rm(tab4);rm(tab5);rm(tab6)  
+ 
+tab1 <- tab1 %>%
+  group_by(Group) %>% 
+  mutate(Percent = round((Freq/ sum(Freq))*100,2),
+         Value = paste0(Freq, '(', Percent, '%', ')')
+         )%>%
+  select(Group, Variable, Value)
+
+
+# Count by Vital Status
+  
+tab1.1 <- as.tibble(xtabs(~Procedure+Vital, data))
+tab1.1$Group <- 'Treatment'
+colnames(tab1.1) <- c('Variable','Vital','Freq', 'Group')
+tab2.2 <- as.tibble(xtabs(~StageAtDx+Vital, data))
+tab2.2$Group <- 'Stage at Diagnosis'
+colnames(tab2.2) <- c('Variable','Vital','Freq', 'Group')
+tab3.3 <- as.tibble(xtabs(~AgeCat+Vital, data))
+tab3.3$Group <- 'Age at Diagnosis'
+colnames(tab3.3) <- c('Variable','Vital','Freq', 'Group')
+tab4.4 <- as.tibble(xtabs(~ER+Vital, data))
+tab4.4$Group <- 'ER Assay'
+colnames(tab4.4) <- c('Variable','Vital','Freq', 'Group')
+tab5.5 <- as.tibble(xtabs(~PR+Vital, data))
+tab5.5$Group <- 'PR Assay'
+colnames(tab5.5) <- c('Variable','Vital','Freq', 'Group')
+tab6.6 <- as.tibble(xtabs(~HER2.cat+Vital, data))
+tab6.6$Group <- 'HER2'
+colnames(tab6.6) <- c('Variable','Vital','Freq', 'Group')
+
+tab1.1 <- tab1.1%>%
+  bind_rows(tab2.2,tab3.3,tab4.4,tab5.5,tab6.6)
+  
+rm(tab2.2);rm(tab3.3);rm(tab4.4);rm(tab5.5);rm(tab6.6)  
+ 
+tab1.1 <- tab1.1 %>%
+  group_by(Group, Vital) %>% 
+  mutate(Percent = round((Freq/ sum(Freq))*100,2),
+         Value = paste0(Freq, '(', Percent, '%', ')')
+         )%>% 
+  select(-c(Freq, Percent))%>%
+  pivot_wider(names_from = Vital, values_from = Value, values_fill = '0(0%)')%>%
+  select(c(Group, Variable,Alive, `CVD death`, `BC death`, `Other Death`))
+
+
+# Final Table
+
+tabF <- tab1 %>% inner_join(tab1.1, by = c('Variable','Group'))
+rm(tab1.1);rm(tab1)
+
+tabF[,2:7]%>%
+  kable(format = "html", escape = FALSE, align = "c", col.names = c("", "Total (N = 27238)",
+                                           "Alive (N=18943)","Cardiac Death (N=537)","Breast Cancer Death (N=4595)" , "Other Cause Death (N=3163)"))%>%
+  group_rows(index = setNames(rle(tabF$Group)[[1]], rle(tabF$Group)[[2]])) 
+
+```
+
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+
+
+tab <- data %>%
+  group_by(Vital)%>% 
+  summarize(Age = paste0(median(AgeDx), "(", quantile(AgeDx)[2],"-", quantile(AgeDx)[4], ")"),
+            `Stage at Diagnosis (Regional)` = paste0(sum(StageAtDx == 'Regional'), "(", round((sum(StageAtDx == 'Regional')/n())*100,1), ")"),
+            `Stage at Diagnosis (Localized)` = paste0(sum(StageAtDx == 'Localized'), "(", round((sum(StageAtDx == 'Localized')/n())*100,1), ")"),
+            `Stage at Diagnosis (Unstaged)` = paste0(sum(StageAtDx == 'Unstaged'), "(", round((sum(StageAtDx == 'Unstaged')/n())*100,1), ")"),
+            `Stage at Diagnosis (Distant)` = paste0(sum(StageAtDx == 'Distant'), "(", round((sum(StageAtDx == 'Distant')/n())*100,1), ")"),
+            
+            `Surgery` = paste0(sum(Surgery == 'Yes'), "(", round((sum(Surgery == 'Yes')/n())*100,1), ")"),
+            `Radiotherapy` = paste0(sum(Radiotherapy == 'Yes'), "(", round((sum(Radiotherapy == 'Yes')/n())*100,1), ")"),
+            `Chemotherapy` = paste0(sum(Chemotherapy == 'Yes'), "(", round((sum(Chemotherapy == 'Yes')/n())*100,1), ")"),
+            
+            `Comorbidity (History_Myocardial infarction)`= paste0(sum(C0 == 1), "(", round((sum(C0 == 1)/n())*100,1), ")"),
+            `Comorbidity (Myocardial infarction)` = paste0(sum(C1 == 1), "(", round((sum(C1 == 1)/n())*100,1), ")"), 
+            `Comorbidity (Congestive heart failure)`= paste0(sum(C2 == 1), "(", round((sum(C2 == 1)/n())*100,1), ")"), 
+            `Comorbidity (Peripheral vascular disease)`= paste0(sum(C3 == 1), "(", round((sum(C3 == 1)/n())*100,1), ")"),
+            `Comorbidity (Cerebrovascular disease)`= paste0(sum(C4 == 1), "(", round((sum(C4 == 1)/n())*100,1), ")"),
+            `Comorbidity (Chronic pulmonary disease)`= paste0(sum(C6 == 1), "(", round((sum(C6 == 1)/n())*100,1), ")"),
+            `Comorbidity (Diabetes without chronic complication)`= paste0(sum(C10 == 1), "(", round((sum(C10 == 1)/n())*100,1), ")"), 
+            `Comorbidity (Diabetes with chronic complication)`= paste0(sum(C11 == 1), "(", round((sum(C11 == 1)/n())*100,1), ")"),
+            `ER Assay (+)` = paste0(sum(ER == 'Positive'), "(", round((sum(ER == 'Positive')/n())*100,1), ")"),
+            `PR Assay (+)`= paste0(sum(PR == 'Positive'), "(", round((sum(PR == 'Positive')/n())*100,1), ")"),
+            `HER2 (+)` = paste0(sum(HER2.cat == 'Positive'), "(", round((sum(HER2.cat == 'Positive')/n())*100,1), ")")
+            ) %>%
+  pivot_longer(cols = -Vital)%>%
+  pivot_wider(names_from = Vital, values_from = value)%>%
+  rename(Variable = name)
+
+
+colnames(tab) <- c("Variable", "Alive (N=18943)","BC Death (N=4595)" ,"Cardiac Death (N=537)", "Noncardiac Death (N=3163)")
+
+
+
+kable(tab,  format = "html", escape = FALSE, align = "c")%>%
+  kable_styling( full_width = FALSE) %>%
+  column_spec(1, bold = TRUE) %>%
+  #add_header_above(c(" ", "EFFECT-HF Sample" = 1, "Cardiac Death" = 1, "Noncardiac Death" = 1)) %>%
+  footnote(general = "Cells reporting patient characteristics contain either n (%) for dichotomous variables or median (25th percentile–75th percentile [Q1–Q3]) for continuous variables.",
+           general_title = "Note: ", 
+           footnote_as_chunk = TRUE)
+```
+
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+# *Table: Count of unknown rows per covariate*
+
+tab2 <- data %>%
+  #group_by()%>% 
+  summarize(Age = paste0(sum(is.na(AgeDx) | AgeDx == 999), "(", round((sum(is.na(AgeDx) | AgeDx == 999)/n())*100,1), ")"),
+            `Stage at Diagnosis` = paste0(sum(StageAtDx %in% c("", NA, 'Unk')), "(", round((sum(StageAtDx %in% c("", NA, 'Unk'))/n())*100,1), ")"),
+            `Surgery` = paste0(sum(Surgery %in% c("", NA, 'Unk')), "(", round((sum(Surgery %in% c("", NA, 'Unk'))/n())*100,1), ")"),
+            `Radiotherapy` = paste0(sum(Radiotherapy %in% c("", NA, 'Unk')), "(", round((sum(Radiotherapy %in% c("", NA, 'Unk'))/n())*100,1), ")"),
+            `Chemotherapy` = paste0(sum(Chemotherapy %in% c("", NA, 'Unk')), "(", round((sum(Chemotherapy %in% c("", NA, 'Unk'))/n())*100,1), ")"),
+            
+            `Comorbidity`= paste0(sum(C0 %in% c("", NA, 'Unk','-1')), "(", round((sum(C0 %in% c("", NA, 'Unk','-1'))/n())*100), ")"),
+            `ER Assay`= paste0(sum(ER %in% c("Unknown")), "(", round((sum(ER %in% c("Unknown"))/n())*100), ")"),
+            `PR Assay`= paste0(sum(PR %in% c("Unknown")), "(", round((sum(PR %in% c("Unknown"))/n())*100), ")"),
+            `HER2`= paste0(sum(HER2.cat %in% c("Unknown")), "(", round((sum(HER2.cat %in% c("Unknown"))/n())*100), ")")
+              ) %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Total (N = 27238)")
+
+
+
+kable(tab2,  format = "html", escape = FALSE, align = "c")%>%
+  kable_styling( full_width = FALSE) %>%
+  column_spec(1, bold = TRUE) %>%
+  footnote(general = "Total and percentage (%) of unknown or missing information for each covariate of interest.",
+           general_title = "Note: ", 
+           footnote_as_chunk = TRUE)
+
+```
+
+#### <ins> B. Exploratory Data Analysis </ins>  
+
+*Figure: Age distribution of study population*
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+data %>%
+  filter(AgeDx != 999)%>%
+  ggplot(aes(x = AgeDx))+
+  geom_histogram()+
+  labs(x = 'Age at diagnosis', y = 'Frequency',
+       title = 'Age distribution')+
+  theme_bw()
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+data %>%
+  filter(AgeDx != 999)%>%
+  ggplot(aes(x = AgeDx))+
+  geom_histogram()+
+  #facet_wrap(~StageAtDx,scales = 'free')+
+  facet_wrap(~StageAtDx)+
+  labs(x = 'Age at diagnosis', y = 'Frequency',
+       title = 'Age distribution by cancer location at diagnosis')+
+  theme_bw()
+```
+  
+  
+*Figure: Bar plots for procedures (surgery,chemotherapy,radiotherapy)  *
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,3))
+barplot(sort(xtabs(~Surgery, data = data), decreasing = TRUE),  main = 'Surgery')
+barplot(sort(xtabs(~Chemotherapy, data = data), decreasing = TRUE), main = 'Chemotherapy')
+barplot(sort(xtabs(~Radiotherapy, data = data), decreasing = TRUE), main = 'Radiotherapy')
+
+# data %>% 
+#  group_by(Vital, Surgery) %>%
+#  summarize(Frequency = n())%>%
+#  ggplot(aes(x = reorder(Surgery,-Frequency), y = Frequency))+
+#    geom_bar(stat = 'identity')+
+#    labs(x = 'Surgery')+
+#    geom_text(aes(label = Frequency), vjust = 0) +
+#    facet_wrap(~Vital, scales = "free")+
+#    theme_minimal()
+
+``` 
+
+
+```{r echo=FALSE, fig.height=10, fig.width=10, message=FALSE, warning=FALSE, paged.print=FALSE}
+# plotting a barplot with percentages 
+
+data %>%  
+  group_by(Vital, Procedure) %>%
+  summarize(Frequency = n())%>% 
+  mutate(Percent = prop.table(Frequency)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = reorder(Procedure,-Percent), y = Percent, label = scales::percent(Percent))) +  
+  geom_bar(stat = 'identity',color = 'black') +  
+  geom_text(vjust = -0.5,    # nudge above top of bar
+            size = 3) +  
+  facet_wrap(~Vital)+
+  theme_bw()+
+  labs(x = '')+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  scale_y_continuous(labels = scales::percent)
+
+```
+
+```{r echo=FALSE, fig.height=6, fig.width=10, message=FALSE, warning=FALSE, paged.print=FALSE}
+data %>%  
+  group_by(Vital, Procedure) %>%
+  summarize(Frequency = n())%>% 
+  mutate(Percent = round(prop.table(Frequency),3)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = reorder(Procedure,-Percent), y = Percent, fill = Vital)) +  
+  geom_bar(stat = 'identity',color = 'black', position = 'dodge') +  
+  labs(x = '')+
+  #facet_wrap(~Procedure, scales = "free_x")+
+  scale_fill_grey(start=0, end=1)+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  scale_y_continuous(labels = scales::percent)
+
+```
+
+  
+*Figure: Bar plot for Comorbidity Index  *
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+barplot(xtabs(~data$Comorb))
+```
+
+  
+*Figure: Bar plots for ER, PR & HER2  *
+
+```{r echo=FALSE, fig.height=6, fig.width=10, message=FALSE, warning=FALSE}
+
+par(mfrow=c(1,3))
+barplot(xtabs(~ER, data = data), main = 'ER Assay')
+barplot(xtabs(~PR, data = data), main = 'PR Assay')
+barplot(xtabs(~HER2.cat, data = data), main = 'HER2')
+
+```
+
+### **III. Competing Risks**
+
+If the goal is to assess cardiac death mortality, both death related to breast cancer 
+and other causes are competing events.   
+
+*Figure 1.A: Cumulative incidence functions (1 = Cardiac death ; 2 = Other cause death)* 
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# Calculating CIF ----------------------------------------------
+# The status variable in these data are coded in a non-standard way. Let’s recode to avoid confusion:
+data <- data %>%
+  mutate(
+    status2 =  ifelse(data$VitalStatus == 0 & data$CVDDeathCause == 'CVD death',1, 
+           ifelse(data$VitalStatus == 0, 2, 0
+                  )),
+    status2 = as.factor(status2),
+    status2.cat = ifelse(status2 == 1, 'CVD Death',
+                         ifelse(status2 == 2, 'Other Death', 'Alive'))
+    )
+data <- data %>%
+  mutate(time =yy_dlc-ydiag)
+
+# Estimate the cumulative incidence in the context of competing risks using the 
+# cuminc function from the {tidycmprsk} package. By default this requires the
+# status to be a factor variable with censored patients coded as 0.
+
+#cuminc(Surv(time, status2) ~ 1, data = data)
+
+# We can use the ggcuminc() function from the {ggsurvfit} package to plot the 
+# cumulative incidence. By default it plots the first event type only. 
+# So the following plot shows the cumulative incidence of death from cvd:
+
+# include both event outcomes
+cuminc(Surv(time, status2)~1, data) %>% 
+  ggcuminc(outcome = c(  "1", "2"))+
+  ylim(c(0, 1)) + 
+  labs(
+    x = "Years"
+  ) + 
+  xlim(c(0,20))+
+  add_confidence_interval()
+
+
+
+```
+  
+  
+*Table: Cumulative Incidence of Death (CVD Death vs Other)*
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+way2 <- tidy(cuminc(Surv(time, status2)~1, data))
+
+way2 <- way2 %>%
+  filter(time %in% c(5,10,15)) %>%
+  mutate(value= paste0(100 * round(estimate,4), '(',100*round(conf.low,4), '-',100*round(conf.high,4), ')' ),
+         outcome = ifelse(outcome == '1','CVD Death',
+                          ifelse(outcome == '2', 'Other Cause Death','')))%>%
+  select(time, outcome, value)%>%
+  pivot_wider(values_from = value, names_from = time)%>%
+  rename(`5 years (%)` = `5`,
+         `10 years (%)` = `10`,
+         `15 years (%)` = `15`,
+         ` ` = outcome)
+  
+kable(way2,  format = "html", escape = FALSE, align = "c")%>%
+  kable_styling( full_width = FALSE) %>%
+  column_spec(1, bold = TRUE) %>%
+  footnote(general = "Values are n (%), unless otherwise indicated. CVD and BC mortality are estimated by Fine and Gray’s competing risk method.",
+           general_title = "Note: ", 
+           footnote_as_chunk = TRUE)
+
+```
+  
+  
+*Figure 1.B: Cumulative incidence functions (1 = Cardiac death ; 2 = Breast Cancer death, 3 = Other Cause death)* 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# Calculating CIF ----------------------------------------------
+# Status considerin BC death
+data <- data %>%
+  mutate(
+    statusV = ifelse(data$Vital == 'CVD death' ,1,
+                     ifelse(data$Vital == 'BC death' ,2, 
+           ifelse(data$Vital == 'Other Death', 3, 0
+                  ))),
+    statusV = as.factor(statusV),
+    )
+
+# include both event outcomes
+
+cuminc(Surv(time, statusV)~1, data) %>% 
+  ggcuminc(outcome = c( "1", "2","3"),
+           linetype_aes = TRUE)+
+  ylim(c(0, .5)) + 
+  labs(
+    x = "Years"
+  ) + 
+  xlim(c(0,20))+
+  scale_linetype_manual(values=c( "solid", "longdash", "dotted"))
+
+
+```
+
+  
+  
+*Table: Cumulative Incidence of Death (including BC mortality)*
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+way3 <- tidy(cuminc(Surv(time, statusV)~1, data))
+
+way3 <- way3 %>%
+  filter(time %in% c(5,10,15)) %>%
+  mutate(value= paste0(100 * round(estimate,4), '(',100*round(conf.low,4), '-',100*round(conf.high,4), ')' ),
+         outcome = ifelse(outcome == '1','CVD Death',
+                          ifelse(outcome == '2', 'BC Death', 'Other Cause Death')))%>%
+  select(time, outcome, value)%>%
+  pivot_wider(values_from = value, names_from = time)%>%
+  rename(`5 years (%)` = `5`,
+         `10 years (%)` = `10`,
+         `15 years (%)` = `15`,
+         ` ` = outcome)
+  
+kable(way3,  format = "html", escape = FALSE, align = "c")%>%
+  kable_styling( full_width = FALSE) %>%
+  column_spec(1, bold = TRUE) %>%
+  footnote(general = "Values are n (%), unless otherwise indicated. CVD, BC mortality and Other Cause mortality are estimated by Fine and Gray’s competing risk method.",
+           general_title = "Note: ", 
+           footnote_as_chunk = TRUE)
+
+```
+
+
+#### <ins>A. Competing Risks Regression </ins> 
+
+##### 1. Subdistribution of Harzards 
+*Table 2: Hazard ratios (and 95% Confidence Intervals) from Subdistribution Hazard Model for Cardiac Death* 
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Competing Risks Regression ----------------------------------------------
+
+#cov.mat <-model.matrix(~AgeDx + StageAtDx + PSite +Grade + Comorb+
+#                         Surgery + Radiotherapy + Chemotherapy + Lateral_label , 
+#                       data = data) [,-1]
+# Subdistribution hazard model for cardiovascular death.
+#crr.1 <- cmprsk::crr(data$time,data$status2,cov.mat,failcode=1,cencode=0)
+
+#summary(crr.1)
+#crr.1$coef
+
+data <- data %>%
+  mutate(Surgery =  factor(Surgery, levels = c("No", "Yes", "Unk")) ,
+         Radiotherapy = factor(Radiotherapy, levels = c("No", "Yes", "Unk")),
+         Chemotherapy = factor(Chemotherapy, levels = c("No", "Yes", "Unk")), 
+         Lateral_label  = factor(Lateral_label),
+         Comorb = factor(Comorb , levels = c("0", "1", "2", "3","4","5","6","7","8",
+                                             "9","10","11","-1"))
+         )
+
+model <- crr(Surv(time,status2) ~AgeDx + StageAtDx + PSite+ Grade+ Comorb+
+                         Surgery + Radiotherapy + Chemotherapy + Lateral_label, data = data)
+
+model %>%
+   tbl_regression(exp = TRUE)
+
+# tidy_model <- tidy(model)
+
+# View the tidy output
+# print(tidy_model)
+
+```
+
+
+#####  2. Cause-Specific Harzard Model
+*Table 3: Hazard ratios (and 95% Confidence Intervals) from Cause Specific Hazard Model for Cardiac Death* 
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+
+coxph(
+  Surv(time, ifelse(status == 1, 1, 0)) ~AgeDx + StageAtDx + PSite+ Grade+ Comorb+
+                         Surgery + Radiotherapy + Chemotherapy + Lateral_label, 
+  data = data) %>% 
+  tbl_regression(exp = TRUE)
+
+
+```
+  
+  
+*Table 4: Hazard ratios (and 95% Confidence Intervals) from Cause Specific Hazard Model for Non - Cardiac Death* 
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+coxph(
+  Surv(time, ifelse(status == 0, 1, 0)) ~AgeDx + StageAtDx + PSite+ Grade+ Comorb+
+                         Surgery + Radiotherapy + Chemotherapy + Lateral_label, 
+  data = data)%>% 
+  tbl_regression(exp = TRUE)
+
+
+```
+
+
+#### Forest Plot of Hazard Ratios
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# Extract the results
+model_summary <- summary(model)
+tidy_model <- tidy(model)
+
+# Create a data frame of the results
+hr_results <- data.frame(
+  group = tidy_model$term ,
+  HR = exp(tidy_model$estimate ),
+  lower_CI = exp(tidy_model$estimate - 1.96 * tidy_model$std.error),
+  upper_CI = exp(tidy_model$estimate + 1.96 * tidy_model$std.error)
+)
+
+# Filter the results for the group variable
+hr_results <- hr_results %>% filter(grepl("StageAtDx", group))
+
+# Rename the group variable for better readability
+hr_results$group <- gsub("StageAtDx", "", hr_results$group)
+
+
+# Create a forest plot
+ggplot(hr_results, aes(x = HR, y = group)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = lower_CI, xmax = upper_CI), height = 0.2) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  labs(title = "Subdistribution HR (95% CI)", x = "Hazard Ratio", y = "") +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 10),
+    axis.title.x = element_text(size = 12),
+    plot.title = element_text(size = 14, face = "bold")
+  )
+
+```
+
+
+
+### **IV. Standard Mortality Ratio** 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# Vital Statistics Data (PR Institute of Statistics) ---------------------- 
+
+ IEPR <- read.csv('C:/Users/enavarro/Documents/Reference Datasets/PR Population Estimates/nchs_mortality_2010.csv',
+                 header = TRUE)
+
+# IEPR <- read.csv('C:/Users/gabri/OneDrive/Documents/CCC/Project Dra. CSanchez/nchs_mortality_2010.csv')
+
+# Age Variable
+IEPR$Age.Detail <- ifelse(substring(as.character(IEPR$AGE),1,1) == "1",
+                          as.numeric(substring(as.character(IEPR$AGE),2:4)),0)
+
+# Exclude unknown age deaths
+IEPR <- IEPR %>% filter(age27 != 27)
+
+# CVD ICDs
+icd <- paste0("I0", 1:9, collapse = '|',paste0("I",10:78, collapse = '|'))
+
+# Include only CVD deaths
+IEPR <- IEPR %>% filter(grepl(icd, ICD10)) 
+
+IEPR.CVD.2010 <- IEPR %>%
+  mutate(AGE = ifelse(Age.Detail >= 85, 85, Age.Detail))%>%
+  group_by(Sex,year,AGE)%>%
+  summarize(Deaths = n())%>%
+  mutate(SEX = ifelse(Sex == "F", 2, 1))
+
+# PR Population estimates (2010)
+
+# http://www.census.gov/programs-surveys/popest/data/data-sets.html
+
+ PRpop2010 <- read.csv('C:/Users/enavarro/Documents/Reference Datasets/PR Population Estimates/2010/prc-est00int-agesex (2010).csv')
+
+# PRpop2010 <- read.csv('C:/Users/gabri/OneDrive/Documents/CCC/Project Dra. CSanchez/prc-est00int-agesex (2010).csv')
+
+PRpop2010 <- PRpop2010 %>%
+  select(SEX, AGE,PROJESTIMATE2010)%>%
+  filter(SEX != 0 & AGE != 999)
+
+CVD.2010 <- IEPR.CVD.2010 %>%
+  left_join(PRpop2010, by = c('SEX','AGE')) %>%
+  mutate(CVD.Mortality = Deaths/PROJESTIMATE2010)
+
+rm(IEPR.CVD.2010);rm(PRpop2010);rm(IEPR)
+
+# SMR ---------------------------------------------------------------------
+
+# SMR: observed number of CVD deaths among breast cancer patients divided by the 
+# expected number of CVD deaths in the matched general female population in PR.
+
+
+mort <- data %>% 
+  filter(AgeDx != 999) %>%
+  mutate(AGE = ifelse(AgeDx>=85,85,AgeDx),
+         AGEgrp = cut(AGE,breaks = 
+                        c(18,24,29,34,39,44,49,54,59,64,69,74,79,84,85),
+                      include.lowest = TRUE)
+         )%>% 
+  group_by(AGEgrp) %>%
+  summarize(BC.Death  = sum(BCDeathCause == 'BC death') , 
+            CVD.Death = sum(CVDDeathCause == 'CVD death'),
+            population = n()
+  )
+ 
+
+#popmort <- popEpi::popmort[year == 2013 & sex == 1,]
+
+mort <- CVD.2010 %>%
+  ungroup()%>%
+  filter(SEX == 2) %>%
+  filter(AGE >= 18) %>%
+  mutate(AGEgrp = cut(AGE,breaks = 
+                                  c(18,24,29,34,39,44,49,54,59,64,69,74,79,84,85),
+                                include.lowest = TRUE)
+  )%>% 
+  group_by(AGEgrp)%>%
+  summarize(Deaths = sum(Deaths),
+            pop2010 = sum(PROJESTIMATE2010))%>%
+  ungroup()%>%
+  mutate(haz = Deaths/pop2010)%>%
+  select(AGEgrp,haz)%>%
+  right_join(mort, by = c('AGEgrp'))
+
+
+
+# Calculate expected deaths for each group
+mort <- mort %>%
+  mutate(expected_deaths = (population * haz))
+
+# total observed and expected deaths
+SMR <- mort %>%
+  summarize(total_observed_deaths = sum(CVD.Death),
+            total_expected_deaths = sum(expected_deaths, na.rm = TRUE)
+  )%>%
+  mutate(SMR =  total_observed_deaths/total_expected_deaths)
+
+
+
+# Calculate confidence intervals for SMRs
+# Using a Poisson distribution to approximate the confidence intervals
+
+alpha <- 0.05  # 95% confidence level
+z <- qnorm(1 - alpha/2)
+SMR <- SMR %>%
+  mutate(lower_limit = total_observed_deaths - z * sqrt(total_observed_deaths),
+         upper_limit =  total_observed_deaths + z * sqrt(total_observed_deaths),
+         lower_CI = lower_limit / total_expected_deaths,
+         upper_CI = upper_limit / total_expected_deaths,
+         type = "Overall SMR"
+)
+
+
+# Print the results
+cat("Total Observed Deaths:", SMR$total_observed_deaths, "\n")
+cat("Total Expected Deaths:", SMR$total_expected_deaths, "\n")
+cat("Standardized Mortality Ratio (SMR):", SMR$SMR, "\n")
+cat("95% Confidence Interval for SMR: [", SMR$lower_CI, ", ", SMR$upper_CI, "]\n")
+
+# Plot the SMRs with confidence intervals
+ggplot(SMR, aes(x = SMR, y = type)) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = lower_CI, xmax = upper_CI), height = 0.2) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "red") +
+  labs(title = "Standardized Mortality Ratios",
+       x = "Standardized Mortality Ratio (SMR)",
+       y = "") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.title.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 10),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(fill = NA, color = "black")
+  ) +
+  geom_text(aes(x = SMR, label = sprintf("%.2f (%.2f - %.2f)", SMR, lower_CI, upper_CI)),
+            hjust = -0.2, size = 3.5, nudge_y = 0.15, nudge_x = -0.25 ) +
+  coord_cartesian(clip = 'off') +
+  theme(plot.margin = unit(c(1, 4, 1, 1), "lines"))
+
+
+```
+
+### **V. Preliminary Observations**
+
+1. Cardiac (CVD) Death represents 6.5% of deaths in study population. Most of the cumulative mortality in study population is due to non cardiac death.
+
+2. Cause-Specific Hazards Model may not be appropriate due to the high number of censoring caused by competing events. 
+
+3. SMR seems to be around 7 times higher in study population than matched general female population.
+Note: This was based of vital statistics data available online. Parameters need to be established. This is to be consider a very preliminary conclusion. 
+
+
+### **VI. Proposed Next Steps**
+
+1. Obtain vital statistics data and define the parameters for the SMR estimation. 
+
+2. Estimate SMR by groups: treatment exposure (surgery, chemotherapy, radiotherapy), comorbidities, stage (localized, regional, distant), age at breast cancer diagnosis, time since breast cancer diagnosis, etc. Verify which are more relevant/appropriate based on descriptive/preliminary analysis.
+
+3. Refine SH Model. Which reference groups should be used for each covariate? Which covariates should be excluded/adjusted based on preliminary analysis? Should some models be perfomed for specific time periods to align with the availability of the data? Example: comorbidity info is available for women diagnosed with breast cancer from 2010 onwards (for modelling the effect of this covariate, we can delimit the time period).    
+
+
+
+
+
+
+
+
+
