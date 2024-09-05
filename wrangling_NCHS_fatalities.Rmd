@@ -10,17 +10,24 @@ editor_options:
 This data is necessary so we can get the CVD death rates for BC and non BC survivors
 in the standard population
 
-```{r data_wrangling, include = FALSE, cache = TRUE}
-rm(list = ls())
-
+```{r libraries, include = FALSE}
 # Loading packages
 library(readxl)
+library(gtsummary)
 library(dplyr)
 
+```
+
+```{r data_wrangling, include = FALSE, cache = TRUE}
+
+year <- 2005:2020
+year <- "2005 - 2020"
+i <- 1
+
 # Loading dataframe
-paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/NCHS/Procesadas/Listas/2020.xlsx",
-           "~/Downloads/NCHS/2020.xlsx",
-           "C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/NCHS/2020.xlsx")
+paths <- c(paste0("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/NCHS/Procesadas/Listas/", year[i], ".xlsx"),
+           paste0("~/Downloads/NCHS/", year[i], ".xlsx"),
+           paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/NCHS/", year[i], ".xlsx"))
 
 # Attempt to read the file
 mort <- tryCatch({
@@ -48,100 +55,130 @@ mort <- mort %>%
   mutate(bcAny = ifelse(grepl("^C(50)", `1_st_condition`)|
            grepl("^C(50)", `2_nd_condition`)|
            grepl("^C(50)", `3_rd_condition`), TRUE, FALSE), # Diagnosis in any level
-         sameLead = icd_code_10_th_revision == `1_st_condition`, # Variable that checks if ICD 10 and 1st Condition are the same
-         age_group = case_when(
-    age_recode_12 %in% 1:6 ~ "0 - 44 years",    # 0-44 years (Under 1 to 35-44)
-    age_recode_12 %in% 7:8 ~ "45 - 64 years",   # 45-64 years (45-54 to 55-64)
-    age_recode_12 %in% 9:11 ~ "65 years and over",  # 65+ years (65-74 to 85+)
-    age_recode_12 == 12 ~ "Age not stated"      # Handle 'Age not stated'
-  ))
-
+         sameLead = icd_code_10_th_revision == `1_st_condition`) # Variable that checks if ICD 10 and 1st Condition are the same
+         
 ```
 
 
-# CVD deaths in women without BC
-```{r CVD_deaths_women, include=FALSE}
+```{r CVD_deaths_women, echo = FALSE}
 
 # CVD deaths excluding breast cancer related deaths
 cvd_deaths_no_BC <- mort %>%
   filter(record_type == 1, # Resident of P.R.
          detail_age_unit == 1, # Age in years
-         detail_age >= 18, # 18 years +
+         detail_age >= 18 &
+         detail_age != 999, # 18 years +
          sex == "F", # Female
           grepl("^I(0|1[1,3]|2|3|4|5[0,1]|6|7[0-8])", `1_st_condition`), # CVD fatalities
          !grepl("^C50", `2_nd_condition`)|
          !grepl("^C50", `3_rd_condition`)) %>% # Excluding BC fatalities 
   select(-c(record_type,
-         detail_age_unit,))
+         detail_age_unit))
 
 
-# CVD deaths excluding all cancer related deaths
-cvd_deaths_no_cancer <- mort %>%
-  filter(record_type == 1, # Resident of P.R.
-         detail_age_unit == 1, # Age in years
-         detail_age >= 18, # 18 years +
-         sex == "F", # Female
-          grepl("^I(0|1[1,3]|2|3|4|5[0,1]|6|7[0-8])", `1_st_condition`),
-         !grepl("^C|^D(1|2|3|4)", `2_nd_condition`)|
-         !grepl("^C|^D(1|2|3|4)", `3_rd_condition`)) %>% # Excluding cancer fatalities. Neoplasms: C00-D49
-  select(-c(record_type,
-         detail_age_unit,))
+cvd_deaths_no_BC <- cvd_deaths_no_BC %>%
+  mutate(Age_Group3 = case_when(
+    detail_age %in% 18:44 ~ "18 to 44 years",
+    detail_age %in% 45:64 ~ "45 to 64 years",
+    detail_age >= 65 ~ "65 years and over"),
+    Age_Group4 = case_when(
+    detail_age %in% 18:44 ~ "18 to 44 years",
+    detail_age %in% 45:64 ~ "45 to 64 years",
+    detail_age %in% 65:84 ~ "65 to 84 years",
+    detail_age >= 85 ~ "85 years and over"))
 
+cvd_deaths_no_BC %>%
+ tbl_summary(include = Age_Group3, , by = current_data_year,
+              percent = "row",
+             statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ))  %>%
+  modify_caption("**Table 1: Cardiovascular disease related deaths in women who resided in Puerto Rico by age group**") %>%
+  modify_footnote(
+    everything() ~ "The cause of death was determined by the 1st condition identified in the death certificate."
+  )
 
-# Breast cancer related deaths
-bc <-   mort %>%
-  filter(record_type == 1, # Resident of P.R.
-         detail_age_unit == 1, # Age in years
-         detail_age >= 18, # 18 years +
-         sex == "F", # Female
-         grepl("^C50", `1_st_condition`)|
-           grepl("^C50", `2_nd_condition`)|
-           grepl("^C50", `3_rd_condition`)) # BC fatalities, 3 first causes
-
+cvd_deaths_no_BC %>%
+ tbl_summary(include = Age_Group4, , by = current_data_year,
+             statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    )) %>%
+  modify_caption("**Table 1: Cardiovascular disease related deaths in women who resided in Puerto Rico by age group**") %>%
+  modify_footnote(
+    everything() ~ "The cause of death was determined by the 1st condition identified in the death certificate."
+  )
+# # CVD deaths excluding all cancer related deaths
+# cvd_deaths_no_cancer <- mort %>%
+#   filter(record_type == 1, # Resident of P.R.
+#          detail_age_unit == 1, # Age in years
+#          detail_age >= 18, # 18 years +
+#          sex == "F", # Female
+#           grepl("^I(0|1[1,3]|2|3|4|5[0,1]|6|7[0-8])", `1_st_condition`),
+#          !grepl("^C|^D(1|2|3|4)", `2_nd_condition`)|
+#          !grepl("^C|^D(1|2|3|4)", `3_rd_condition`)) %>% # Excluding cancer fatalities. Neoplasms: C00-D49
+#   select(-c(record_type,
+#          detail_age_unit,))
+# 
+# 
+# # Breast cancer related deaths
+# bc <-   mort %>%
+#   filter(record_type == 1, # Resident of P.R.
+#          detail_age_unit == 1, # Age in years
+#          detail_age >= 18, # 18 years +
+#          sex == "F", # Female
+#          grepl("^C50", `1_st_condition`)|
+#            grepl("^C50", `2_nd_condition`)|
+#            grepl("^C50", `3_rd_condition`)) # BC fatalities, 3 first causes
+# 
 
 
 ```
 
-```{r stratification, include = FALSE}
+```{r stats}
 
-summary(mort$detail_age)
+mean(cvd_deaths_no_BC$detail_age)
+median(cvd_deaths_no_BC$detail_age)
 
+hist(cvd_deaths_no_BC$detail_age, breaks = 115)
 ```
+
 
 ```{r quality_control, include = FALSE}
-# Alzheimer test ----------
-# Filtering using ICD 10 variable
-test <- mort %>%
-  filter(grepl("^G(30)", icd_code_10_th_revision))
-#Codes included check
-table(test$icd_code_10_th_revision)
-reportN <- 2627 #NVSR number of deaths
-nrow(test) - reportN # Difference in N between report and my analysis
-nrow(test)/reportN*100
-
-# Filtering using 1st condition
-test2 <- mort %>%
-  filter(grepl("^G(30)", `1_st_condition`))
-#Codes included check
-table(test$icd_code_10_th_revision)
-nrow(test2) - reportN # Difference in N between report and my analysis
-nrow(test2)/reportN*100
-
-# CVD test -----------
-# Filtering
-test <- mort %>%
- # filter(grepl("^I(00|0[1-9]|11|13|2[0-9]|3[0-9]|4[0-9]|50|51)", icd_code_10_th_revision))
-  filter(grepl("^I(0|11|13|2|3|4|50|51)", icd_code_10_th_revision))
-
-#Codes included check
-table(test$icd_code_10_th_revision)
-reportN <- 5565 #NVSR number of deaths
-nrow(test) - reportN # Difference in N between report and my analysis
-nrow(test)/reportN*100
-
-test2 <- mort %>%
-   filter(grepl("^I(0|11|13|2|3|4|50|51)",, `1_st_condition`))
-table(test2$`1_st_condition`)
-nrow(test2) - reportN # Difference in N between report and my analysis
-nrow(test2)/reportN*100
+# # Alzheimer test ----------
+# # Filtering using ICD 10 variable
+# test <- mort %>%
+#   filter(grepl("^G(30)", icd_code_10_th_revision))
+# #Codes included check
+# table(test$icd_code_10_th_revision)
+# reportN <- 2627 #NVSR number of deaths
+# nrow(test) - reportN # Difference in N between report and my analysis
+# nrow(test)/reportN*100
+# 
+# # Filtering using 1st condition
+# test2 <- mort %>%
+#   filter(grepl("^G(30)", `1_st_condition`))
+# #Codes included check
+# table(test$icd_code_10_th_revision)
+# nrow(test2) - reportN # Difference in N between report and my analysis
+# nrow(test2)/reportN*100
+# 
+# # CVD test -----------
+# # Filtering
+# test <- mort %>%
+#  # filter(grepl("^I(00|0[1-9]|11|13|2[0-9]|3[0-9]|4[0-9]|50|51)", icd_code_10_th_revision))
+#   filter(grepl("^I(0|11|13|2|3|4|50|51)", icd_code_10_th_revision))
+# 
+# #Codes included check
+# table(test$icd_code_10_th_revision)
+# reportN <- 5565 #NVSR number of deaths
+# nrow(test) - reportN # Difference in N between report and my analysis
+# nrow(test)/reportN*100
+# 
+# test2 <- mort %>%
+#    filter(grepl("^I(0|11|13|2|3|4|50|51)",, `1_st_condition`))
+# table(test2$`1_st_condition`)
+# nrow(test2) - reportN # Difference in N between report and my analysis
+# nrow(test2)/reportN*100
 ```
