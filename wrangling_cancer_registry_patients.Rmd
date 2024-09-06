@@ -1,0 +1,32 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+```{r setup}
+
+# Libraries
+library(dplyr)
+library(readxl)
+
+# Paths
+paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/datosCarola_invasive_seq0&1_NoID.xlsx",
+           "~/Downloads/Registro Central de Cáncer/datosCarola_invasive_seq0&1_NoID.xlsx",
+           paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/datosCarola_invasive_seq0&1_NoID.xlsx"))
+
+# Loading dataframe
+
+cancer <- tryCatch({
+  read_excel(paths[1])
+}, error = function(e) {
+  read_excel(paths[2])
+}, error = function(e) {
+  read_excel(paths[3])
+})
+
+```
+
+```
