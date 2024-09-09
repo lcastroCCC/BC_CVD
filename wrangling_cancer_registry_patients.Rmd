@@ -11,6 +11,7 @@ editor_options:
 # Libraries
 library(dplyr)
 library(readxl)
+library(gtsummary)
 
 # Paths
 paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/datosCarola_invasive_seq0&1_NoID.xlsx",
@@ -19,14 +20,29 @@ paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro 
 
 # Loading dataframe
 
-cancer <- tryCatch({
+cancer <- suppressWarnings(tryCatch({
   read_excel(paths[1])
 }, error = function(e) {
   read_excel(paths[2])
 }, error = function(e) {
   read_excel(paths[3])
-})
+}))
+
+cancer$AgeDx <- as.numeric(cancer$AgeDx)
 
 ```
 
+```{r}
+
+cvd_deaths_BC <- cancer %>%
+  filter(VitalStatus_label == "Dead",
+         CVDDeathCause == "CVD death")
+
+cancer %>%
+ tbl_summary(include = c(AgeDx, VitalStatus_label, BCDeathCause, CVDDeathCause), by = ydiag,
+             statistic = list(
+      all_continuous() ~ "{mean} ({sd})",
+      all_categorical() ~ "{n} ({p}%)"
+    ))
 ```
+
