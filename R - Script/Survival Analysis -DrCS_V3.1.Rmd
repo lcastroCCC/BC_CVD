@@ -201,6 +201,10 @@ data$Vital <- ifelse(data$VitalStatus == 0 & data$CVDDeathCause == 'CVD death','
 data$status <- ifelse(data$VitalStatus == 0 & data$CVDDeathCause == 'CVD death',1, 0)
 data$status <- as.factor(data$status)
 
+# Recode status to 1 event (CVD death) and 0 censored
+data$statusBC <- ifelse(data$VitalStatus == 0 & data$BCDeathCause == 'BC death',1, 0)
+data$statusBC <- as.factor(data$statusBC)
+
 # Recode status to 1 event (All cause death) and 0 censored (for all cause mortality)
 data$status1 <- ifelse(data$VitalStatus == 0 ,1, 0)
 
@@ -772,7 +776,7 @@ km_plot2$plot <- km_plot2$plot +
     legend.title = element_text(size = 10),
     legend.text = element_text(size = 8)
   ) +
-  labs(title = "Survival Curve by Treatment") +
+  labs(title = "Survival Curve by Survery Treatment") +
   guides(color = guide_legend(ncol = 3)) 
 
 # Print the plot
@@ -969,37 +973,47 @@ cuminc(Surv(time, status2) ~ AgeCat, data) %>%
 
 # CIF for CVD by Comorbidity 
 
-cuminc(Surv(time, status2) ~ Comorb.cat , data) %>% 
-  ggcuminc(outcome = c( "1"),
+cuminc(Surv(time, statusV) ~ Comorb.cat , data) %>% 
+  ggcuminc(outcome = c("1"),
            linetype_aes = TRUE, size = 1)+
  #add_confidence_interval() +
  #add_risktable() +
   ylim(c(0, .1)) + 
   labs(
     x = "Survival Time (Years)",
-    title = 'CIF for CVD by Comorbidity'
+    title = 'CIF for Cardiovascular Disease by Comorbidity'
   ) + 
-  xlim(c(0,20)) +  scale_linetype_manual(values=c( 1:9))
+  xlim(c(0,20)) + scale_linetype_manual(values=c(rep("dashed",3)))
 
 
-```
+# CIF for BC by Comorbidity 
 
+cuminc(Surv(time, statusV) ~ Comorb.cat , data) %>% 
+  ggcuminc(outcome = c("2"),
+           linetype_aes = TRUE, size = 1)+
+ #add_confidence_interval() +
+ #add_risktable() +
+  labs(
+    x = "Survival Time (Years)",
+    title = 'CIF for Breast Cancer by Comorbidity'
+  ) + 
+  xlim(c(0,20)) + scale_linetype_manual(values=c(rep("dotted",3)))
 
-```{r echo=FALSE,fig.height=8, fig.width=12, message=FALSE, warning=FALSE, paged.print=FALSE}
 
 # CIF for CVD by Comorbidity 
 
 cuminc(Surv(time, statusV) ~ Comorb.cat , data) %>% 
-  ggcuminc(outcome = c( "1"),
+  ggcuminc(outcome = c("1", "2"),
            linetype_aes = TRUE, size = 1)+
  #add_confidence_interval() +
  #add_risktable() +
-  ylim(c(0, .1)) + 
+  #ylim(c(0, .1)) + 
   labs(
     x = "Survival Time (Years)",
-    title = 'Cumulative Incidence Functions by Comorbidity'
+      title = 'CIF for Cardiovascular Disease and Breast Cancer by Comorbidity'
   ) + 
-  xlim(c(0,20)) +  scale_linetype_manual(values=c( 1:9))
+  xlim(c(0,20)) +   scale_linetype_manual(values = c("dashed", "dotted"),
+                        labels = c("Cardiovascular disease", "Breast Cancer"))
 
 
 ```
