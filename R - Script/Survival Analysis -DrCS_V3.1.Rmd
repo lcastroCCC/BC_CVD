@@ -1023,7 +1023,7 @@ cuminc(Surv(time, statusV) ~ Comorb.cat , data) %>%
 
 # CIF for CVD by cancer Stage at Diagnosis 
 
-cuminc(Surv(time, status2) ~ StageAtDx , data) %>% 
+cuminc(Surv(time, statusV) ~ StageAtDx , data) %>% 
   ggcuminc(outcome = c( "1"),
            linetype_aes = TRUE, size = 1)+
  #add_confidence_interval() +
@@ -1033,9 +1033,35 @@ cuminc(Surv(time, status2) ~ StageAtDx , data) %>%
     x = "Survival Time (Years)",
     title = 'CIF for CVD by Stage at Diagnosis'
   ) + 
-  xlim(c(0,20)) +  scale_linetype_manual(values=c( 1:9))
+  xlim(c(0,20)) +  scale_linetype_manual(values=c(rep("dashed",4)))
 
+# CIF for BC by cancer Stage at Diagnosis 
 
+cuminc(Surv(time, statusV) ~ StageAtDx , data) %>% 
+  ggcuminc(outcome = c( "2"),
+           linetype_aes = TRUE, size = 1)+
+ #add_confidence_interval() +
+ #add_risktable() +
+  #ylim(c(0, .1)) + 
+  labs(
+    x = "Survival Time (Years)",
+    title = 'CIF for Breast Cancer by Stage at Diagnosis'
+  ) + 
+  xlim(c(0,20)) +  scale_linetype_manual(values=c(rep("dotted",4)))
+
+# CIF for CVD and BC by cancer Stage at Diagnosis 
+
+cuminc(Surv(time, statusV) ~ StageAtDx , data) %>% 
+  ggcuminc(outcome = c("1", "2"),
+           linetype_aes = TRUE, size = 1)+
+ #add_confidence_interval() +
+ #add_risktable() +
+  labs(
+    x = "Survival Time (Years)",
+    title = 'CIF for Cardiovascular Disease and Breast Cancer by Stage at Diagnosis'
+  ) + 
+  xlim(c(0,20)) + scale_linetype_manual(values = c("dashed", "dotted"),
+                        labels = c("Cardiovascular disease", "Breast Cancer"))
 ```
 
 #### <ins>A. Competing Risks Regression </ins> 

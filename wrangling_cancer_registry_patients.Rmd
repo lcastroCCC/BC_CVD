@@ -19,7 +19,7 @@ library(tidyverse)
 
 
 
-```{r data_wrangling, include = FALSE, cache = TRUE}
+```{r data_wrangling,  cache = TRUE}
 # Paths
 paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/datosCarola_invasive_seq0&1_NoID.xlsx",
            "~/Downloads/Registro Central de Cáncer/datosCarola_invasive_seq0&1_NoID.xlsx",
