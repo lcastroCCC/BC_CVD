@@ -1,25 +1,31 @@
 ---
+title: "Registro Central de Cáncer"
+author: "Liliana Castro Jiménez"
+date: "2024-09-10"
 output: html_document
 editor_options: 
   chunk_output_type: console
 ---
 
+This data is necessary so we can get the CVD death rates for BC survivors
+in the standard population
 
-
-```{r setup}
-
-# Libraries
-library(dplyr)
+```{r libraries, include = FALSE}
+# Loading packages
 library(readxl)
 library(gtsummary)
+library(tidyverse)
+```
 
+
+
+```{r data_wrangling, include = FALSE, cache = TRUE}
 # Paths
 paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/datosCarola_invasive_seq0&1_NoID.xlsx",
            "~/Downloads/Registro Central de Cáncer/datosCarola_invasive_seq0&1_NoID.xlsx",
            paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/datosCarola_invasive_seq0&1_NoID.xlsx"))
 
-# Loading dataframe
-
+# Attempt to read the file
 cancer <- suppressWarnings(tryCatch({
   read_excel(paths[1])
 }, error = function(e) {
@@ -28,21 +34,75 @@ cancer <- suppressWarnings(tryCatch({
   read_excel(paths[3])
 }))
 
-cancer$AgeDx <- as.numeric(cancer$AgeDx)
+cancer <- cancer %>% 
+  select(EncryptedID, ydiag, AgeDx, VitalStatus, BCDeathCause, CVDDeathCause) %>% 
+  mutate(AgeDx = as.numeric(cancer$AgeDx),
+         AgeCat = case_when(AgeDx >= 18 & AgeDx <= 44 ~ "18-44",
+                            AgeDx >= 45 & AgeDx <= 64 ~ "45-64",
+                            AgeDx >= 65 & AgeDx <= 84 ~ "65-84",
+                            AgeDx >= 85 & AgeDx < 120 ~ "85+",
+                            TRUE ~ "Unknown"),
+         Vital = ifelse(VitalStatus == 0 & CVDDeathCause == 'CVD death','CVD death', 
+                     ifelse(VitalStatus == 0 & BCDeathCause == 'BC death', 'BC death', 
+                            ifelse(VitalStatus == 0, 'Other Death', 'Alive'
+                            )))) %>% 
+  select(EncryptedID, ydiag, AgeDx, AgeCat, Vital)
 
-```
+# Crear datos BC survivors ------------------------------------------------------------
+## Crear la tabla inicial agrupada por año y categoría de edad
+BC_alive <- cancer %>%
+  filter(Vital == "Alive") %>% 
+  group_by(ydiag, AgeCat) %>% 
+  summarize(BC_alive = n()) 
 
-```{r}
+## Sumar los casos de todas las categorías de edad por año
+BC_alive_overall <- BC_alive %>%
+  group_by(ydiag) %>%
+  summarize(BC_alive = sum(BC_alive)) %>%
+  mutate(AgeCat = "Overall") 
 
+## Combinar las tablas original y la de totales
+BC_alive_final <- bind_rows(BC_alive, BC_alive_overall) %>%
+  arrange(ydiag, AgeCat)
+
+rm(BC_alive, BC_alive_overall)
+
+# Crear datos CVD deaths in BC patients -----------------------------------------------
+## Crear la tabla inicial agrupada por año y categoría de edad
 cvd_deaths_BC <- cancer %>%
-  filter(VitalStatus_label == "Dead",
-         CVDDeathCause == "CVD death")
+  filter(Vital == "CVD death") %>% 
+  group_by(ydiag, AgeCat) %>% 
+  summarize(cvd_deaths_BC = n()) 
 
-cancer %>%
- tbl_summary(include = c(AgeDx, VitalStatus_label, BCDeathCause, CVDDeathCause), by = ydiag,
-             statistic = list(
-      all_continuous() ~ "{mean} ({sd})",
-      all_categorical() ~ "{n} ({p}%)"
-    ))
+## Sumar los casos de todas las categorías de edad por año
+cvd_deaths_BC_overall <- cvd_deaths_BC %>%
+  group_by(ydiag) %>%
+  summarize(cvd_deaths_BC = sum(cvd_deaths_BC)) %>%
+  mutate(AgeCat = "Overall") 
+
+## Combinar las tablas original y la de totales
+cvd_deaths_BC_final <- bind_rows(cvd_deaths_BC, cvd_deaths_BC_overall) %>%
+  arrange(ydiag, AgeCat)
+
+rm(cvd_deaths_BC, cvd_deaths_BC_overall)
+
+# Crear un data frame con todas las categorías posibles de AgeCat
+all_categories <- expand.grid(
+  ydiag = unique(BC_alive_final$ydiag),  # Todas las categorías posibles de ydiag
+  AgeCat = unique(BC_alive_final$AgeCat) # Todas las categorías posibles de AgeCat
+)
+
+# Full Data ------------------------
+BC_dat <- full_join(all_categories, cvd_deaths_BC_final, by = c("ydiag", "AgeCat")) %>%
+  full_join(BC_alive_final, by = c("ydiag", "AgeCat")) %>%
+  mutate(across(everything(), ~replace_na(.x, 0))) %>%
+  arrange(ydiag, AgeCat) %>% 
+  mutate(cvd_deaths_BC_rate = (cvd_deaths_BC/BC_alive)*1000) %>% 
+  filter(AgeCat != "Unknown")
+
+rm(all_categories, cvd_deaths_BC_final)
+
+View(BC_dat)
 ```
+
 
