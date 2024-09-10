@@ -100,7 +100,7 @@ BC_dat <- full_join(all_categories, cvd_deaths_BC_final, by = c("ydiag", "AgeCat
   mutate(cvd_deaths_BC_rate = (cvd_deaths_BC/BC_alive)*1000) %>% 
   filter(AgeCat != "Unknown")
 
-rm(all_categories, BC_alive_final, cvd_deaths_BC_final)
+rm(all_categories, cvd_deaths_BC_final)
 
 View(BC_dat)
 ```
