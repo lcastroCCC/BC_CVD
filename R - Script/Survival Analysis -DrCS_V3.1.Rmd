@@ -265,7 +265,6 @@ Below is the overall proposed analysis strategy to meet the study objectives:
 # Descriptive Analysis ----------------------------------------------------
 
 data %>%
-  filter(Vital %in% c("BC death", "CVD death")) %>%
   select(c(Vital, Procedure, StageAtDx, AgeCat, ER, PR, HER2.cat, CsumCat, `Myocardial Infarction`, `Congestive heart failure`, `Peripheral vascular disease`, `Cerebrovascular disease`, `Chronic pulmonary disease`, `Diabetes without chronic complication`, `Diabetes with chronic complication`, HealthRegion)) %>%
  tbl_summary(by = Vital,
               label = c(Procedure ~ "Treatment",
@@ -289,7 +288,6 @@ data %>%
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
 data %>%
-  filter(Vital %in% c("BC death", "CVD death")) %>%
   filter(Vital != "Alive", AgeDx != 999, time >=0 ) %>% 
   select(c(Vital, AgeDx, AgeFU, time)) %>%
  tbl_summary(by = Vital,
@@ -302,7 +300,8 @@ data %>%
       "{median} ({p25}-{p75})",
       "{min}-{max}"),
     all_categorical() ~ "{n} ({p}%)"))  %>%
-    add_overall() %>%
+  modify_column_hide(columns = "stat_3") %>%
+    add_overall(col_label = "**All death causes**  \nN = {style_number(N)}") %>%
    modify_footnote(everything() ~ NA) %>%
   modify_caption("**Table 2: Summary statistics by mortality type**")
 
@@ -565,10 +564,7 @@ allC <- tidy(km_fit)
 
 allC  <- allC   %>%
   filter(time %in% c(5,10,15)) %>%
-  mutate(value= paste0(100 * round(estimate,4), '(',100*round(conf.low,4), '-',100*round(conf.high,4), ')' )
-        # outcome = ifelse(outcome == '1','CVD Death',
-        #                  ifelse(outcome == '2', 'Other Cause Death',''))
-        )%>%
+  mutate(value= paste0(100 * round(estimate,4), '(',100*round(conf.low,4), '-',100*round(conf.high,4), ')'))%>%
   select(time, value)%>%
   pivot_wider(values_from = value, names_from = time)%>%
   rename(`5-year (95% CI)` = `5`,
