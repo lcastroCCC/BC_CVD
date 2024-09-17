@@ -35,74 +35,134 @@ cancer <- suppressWarnings(tryCatch({
 }))
 
 cancer <- cancer %>% 
-  select(EncryptedID, ydiag, AgeDx, VitalStatus, BCDeathCause, CVDDeathCause) %>% 
+  select(EncryptedID, ydiag, yy_dlc, AgeDx, VitalStatus, 
+         BCDeathCause, CVDDeathCause) %>% 
   mutate(AgeDx = as.numeric(cancer$AgeDx),
-         AgeCat = case_when(AgeDx >= 18 & AgeDx <= 44 ~ "18-44",
-                            AgeDx >= 45 & AgeDx <= 64 ~ "45-64",
-                            AgeDx >= 65 & AgeDx <= 84 ~ "65-84",
-                            AgeDx >= 85 & AgeDx < 120 ~ "85+",
-                            TRUE ~ "Unknown"),
-         Vital = ifelse(VitalStatus == 0 & CVDDeathCause == 'CVD death','CVD death', 
-                     ifelse(VitalStatus == 0 & BCDeathCause == 'BC death', 'BC death', 
-                            ifelse(VitalStatus == 0, 'Other Death', 'Alive'
-                            )))) %>% 
-  select(EncryptedID, ydiag, AgeDx, AgeCat, Vital)
+         AgeDxCat = as.factor(case_when(AgeDx >= 18 & AgeDx <= 79 ~ "18-79",
+                            AgeDx >= 80 ~ "80+",
+                            TRUE ~ "Unknown")),
+         AgeDeath = ifelse(VitalStatus == 0,
+         AgeDx + (yy_dlc - ydiag), NA),
+         AgeDeathCat = as.factor(case_when(AgeDeath >= 18 & AgeDeath <= 79 ~ "18-79",
+                            AgeDeath >= 80 ~ "80+",
+                            TRUE ~ NA)),
+         AgeDeathCat2 = as.factor(case_when(AgeDeath >= 18 & AgeDeath <= 49 ~ "18-49",
+                            AgeDeath >= 50 ~ "50+",
+                            TRUE ~ NA)),
+         AgeDeathCat3 = as.factor(case_when(AgeDeath >= 18 & AgeDeath <= 64 ~ "18-64",
+                            AgeDeath >= 65 & AgeDeath <= 84 ~ "65-84",
+                            AgeDeath >= 85 ~ "85+",
+                            TRUE ~ NA)),
+         Vital = as.factor(ifelse(VitalStatus == 0 & CVDDeathCause == 'CVD death','CVD death', 
+                        ifelse(VitalStatus == 0 & BCDeathCause == 'BC death', 'BC death', 
+                               ifelse(VitalStatus == 0, 'Other Death', 'Alive'
+                               ))))) %>% 
+  select(EncryptedID, ydiag, AgeDx, AgeDxCat, yy_dlc, AgeDeath, AgeDeathCat, AgeDeathCat2, AgeDeathCat3, Vital)
 
 # Crear datos BC survivors ------------------------------------------------------------
 ## Crear la tabla inicial agrupada por año y categoría de edad
-BC_alive <- cancer %>%
-  filter(Vital == "Alive") %>% 
-  group_by(ydiag, AgeCat) %>% 
-  summarize(BC_alive = n()) 
+# BC_alive <- cancer %>%
+#   filter(Vital == "Alive") %>% 
+#   group_by(ydiag, AgeDeathCat) %>% 
+#   summarize(BC_alive = n()) 
 
 ## Sumar los casos de todas las categorías de edad por año
-BC_alive_overall <- BC_alive %>%
-  group_by(ydiag) %>%
-  summarize(BC_alive = sum(BC_alive)) %>%
-  mutate(AgeCat = "Overall") 
+# BC_alive_overall <- BC_alive %>%
+#   group_by(ydiag) %>%
+#   summarize(BC_alive = sum(BC_alive)) %>%
+#   mutate(AgeDeathCat = "Overall") 
 
 ## Combinar las tablas original y la de totales
-BC_alive_final <- bind_rows(BC_alive, BC_alive_overall) %>%
-  arrange(ydiag, AgeCat)
-
-rm(BC_alive, BC_alive_overall)
+# BC_alive_final <- bind_rows(BC_alive, BC_alive_overall) %>%
+#   arrange(ydiag, AgeDeathCat)
+# 
+# rm(BC_alive, BC_alive_overall)
 
 # Crear datos CVD deaths in BC patients -----------------------------------------------
-## Crear la tabla inicial agrupada por año y categoría de edad
-cvd_deaths_BC <- cancer %>%
-  filter(Vital == "CVD death") %>% 
-  group_by(ydiag, AgeCat) %>% 
-  summarize(cvd_deaths_BC = n()) 
 
-## Sumar los casos de todas las categorías de edad por año
-cvd_deaths_BC_overall <- cvd_deaths_BC %>%
-  group_by(ydiag) %>%
-  summarize(cvd_deaths_BC = sum(cvd_deaths_BC)) %>%
-  mutate(AgeCat = "Overall") 
+# Grupos de edad 18-79 y 80+
+cvd_deaths_BC_final <- cancer %>%
+  filter(Vital == "CVD death") %>%
+  group_by(yy_dlc, AgeDeathCat) %>% # Agrupados por año de muerte y grupo de edad
+  summarize(cvd_deaths_BC = n(), .groups = "drop") %>% # Counts
+  complete(yy_dlc, AgeDeathCat, fill = list(cvd_deaths_BC = 0)) %>% # Incluir 0s
+  bind_rows(
+    group_by(., yy_dlc) %>% # Obtener counts por año overall
+      summarize(cvd_deaths_BC = sum(cvd_deaths_BC), .groups = "drop") %>%
+      mutate(AgeDeathCat = "Overall")
+  ) %>%
+  arrange(yy_dlc, AgeDeathCat) %>%
+  pivot_wider(names_from = AgeDeathCat, values_from = cvd_deaths_BC) %>%# Tabla wide por grupo de edad
+rename(YearDeath = yy_dlc) %>% 
+  mutate(YearDeath = as.factor(YearDeath)) %>%
+  bind_rows(
+    summarise(., YearDeath = "All years", across(where(is.numeric), sum, na.rm = TRUE))
+  )
+  
+View(cvd_deaths_BC_final)
 
-## Combinar las tablas original y la de totales
-cvd_deaths_BC_final <- bind_rows(cvd_deaths_BC, cvd_deaths_BC_overall) %>%
-  arrange(ydiag, AgeCat)
 
-rm(cvd_deaths_BC, cvd_deaths_BC_overall)
+# Grupos de edad 18-49 y 50+
+cvd_deaths_BC_final2 <- cancer %>%
+  filter(Vital == "CVD death") %>%
+  group_by(yy_dlc, AgeDeathCat2) %>% # Agrupados por año de muerte y grupo de edad
+  summarize(cvd_deaths_BC = n(), .groups = "drop") %>% # Counts
+  complete(yy_dlc, AgeDeathCat2, fill = list(cvd_deaths_BC = 0)) %>% # Incluir 0s
+  bind_rows(
+    group_by(., yy_dlc) %>% # Obtener counts por año overall
+      summarize(cvd_deaths_BC = sum(cvd_deaths_BC), .groups = "drop") %>%
+      mutate(AgeDeathCat2 = "Overall")
+  ) %>%
+  arrange(yy_dlc, AgeDeathCat2) %>%
+  pivot_wider(names_from = AgeDeathCat2, values_from = cvd_deaths_BC) %>% # Tabla wide por grupo de edad
+rename(YearDeath = yy_dlc) %>% 
+  mutate(YearDeath = as.factor(YearDeath)) %>%
+  bind_rows(
+    summarise(., YearDeath = "All years", across(where(is.numeric), sum, na.rm = TRUE))
+  )
 
-# Crear un data frame con todas las categorías posibles de AgeCat
-all_categories <- expand.grid(
-  ydiag = unique(BC_alive_final$ydiag),  # Todas las categorías posibles de ydiag
-  AgeCat = unique(BC_alive_final$AgeCat) # Todas las categorías posibles de AgeCat
-)
+View(cvd_deaths_BC_final2)
+
+
+
+# Grupos de edad 18-64, 65-84 y 85+
+cvd_deaths_BC_final3 <- cancer %>%
+  filter(Vital == "CVD death") %>%
+  group_by(yy_dlc, AgeDeathCat3) %>% # Agrupados por año de muerte y grupo de edad
+  summarize(cvd_deaths_BC = n(), .groups = "drop") %>% # Counts
+  complete(yy_dlc, AgeDeathCat3, fill = list(cvd_deaths_BC = 0)) %>% # Incluir 0s
+  bind_rows(
+    group_by(., yy_dlc) %>% # Obtener counts por año overall
+      summarize(cvd_deaths_BC = sum(cvd_deaths_BC), .groups = "drop") %>%
+      mutate(AgeDeathCat3 = "Overall")
+  ) %>%
+  arrange(yy_dlc, AgeDeathCat3) %>%
+  pivot_wider(names_from = AgeDeathCat3, values_from = cvd_deaths_BC) %>% # Tabla wide por grupo de edad
+rename(YearDeath = yy_dlc) %>% 
+  mutate(YearDeath = as.factor(YearDeath)) %>%
+  bind_rows(
+    summarise(., YearDeath = "All years", across(where(is.numeric), sum, na.rm = TRUE))
+  )
+
+View(cvd_deaths_BC_final3)
+
+# Crear un data frame con todas las categorías posibles de AgeDeathCat
+# all_categories <- expand.grid(
+#   yy_dlc = unique(BC_alive_final$yy_dlc),  # Todas las categorías posibles de yy_dlc
+#   AgeDeathCat = unique(BC_alive_final$AgeDeathCat) # Todas las categorías posibles de AgeDeathCat
+# )
 
 # Full Data ------------------------
-BC_dat <- full_join(all_categories, cvd_deaths_BC_final, by = c("ydiag", "AgeCat")) %>%
-  full_join(BC_alive_final, by = c("ydiag", "AgeCat")) %>%
-  mutate(across(everything(), ~replace_na(.x, 0))) %>%
-  arrange(ydiag, AgeCat) %>% 
-  mutate(cvd_deaths_BC_rate = (cvd_deaths_BC/BC_alive)*1000) %>% 
-  filter(AgeCat != "Unknown")
-
-rm(all_categories, cvd_deaths_BC_final)
-
-View(BC_dat)
+# BC_dat <- full_join(all_categories, cvd_deaths_BC_final, by = c("yy_dlc", "AgeDeathCat")) %>%
+#   full_join(BC_alive_final, by = c("yy_dlc", "AgeDeathCat")) %>%
+#   mutate(across(everything(), ~replace_na(.x, 0))) %>%
+#   arrange(yy_dlc, AgeDeathCat) %>% 
+#   mutate(cvd_deaths_BC_rate = (cvd_deaths_BC/BC_alive)*1000) %>% 
+#   filter(AgeDeathCat != "Unknown")
+# 
+# rm(all_categories, cvd_deaths_BC_final)
+# 
+# View(BC_dat)
 ```
 
 
