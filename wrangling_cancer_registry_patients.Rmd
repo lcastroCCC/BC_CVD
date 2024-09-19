@@ -16,8 +16,6 @@ library(gtsummary)
 library(tidyverse)
 ```
 
-
-
 ```{r data_wrangling,  cache = TRUE}
 # Paths
 paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/datosCarola_invasive_seq0&1_NoID.xlsx",
@@ -34,8 +32,6 @@ cancer <- suppressWarnings(tryCatch({
 }))
 
 cancer <- cancer %>% 
-  # select(ydiag, yy_dlc, AgeDx, VitalStatus, 
-  #        BCDeathCause, CVDDeathCause) %>% 
   mutate(AgeDx = as.numeric(cancer$AgeDx),
          AgeFollowUpStart = AgeDx + 1,
          AgeDxCat = as.factor(case_when(AgeDx >= 18 & AgeDx <= 59 ~ "18-59",
@@ -59,71 +55,35 @@ cancer <- cancer %>%
          SurvivalTime = ifelse(VitalStatus == 1, NA,
                                ifelse(VitalStatus == 0 & FollowUpStart <= yy_dlc,
                                       yy_dlc - FollowUpStart, 0)),           
-         AgeDeathCat = as.factor(case_when(AgeDeath >= 18 & AgeDeath <= 59 ~ "18-59",
+         AgeDeathCat = as.factor(case_when(AgeDeath < 60 ~ "18-59",
                                            AgeDeath >= 60 ~ "60+",
                                            TRUE ~ NA)),
-         AgeDeathCat2 = as.factor(case_when(AgeDeath >= 18 & AgeDeath <= 49 ~ "18-49",
-                                            AgeDeath >= 50 ~ "50+",
-                                            TRUE ~ NA)),
-         AgeDeathCat3 = as.factor(case_when(AgeDeath >= 18 & AgeDeath <= 64 ~ "18-64",
-                                            AgeDeath >= 65 & AgeDeath <= 84 ~ "65-84",
-                                            AgeDeath >= 85 ~ "85+",
+         AgeDeathCat2 = as.factor(case_when(AgeDeath >= 18 & AgeDeath <= 59 ~ "18-59",
+                                            AgeDeath >= 60 & AgeDeath <= 69 ~ "60-69",
+                                            AgeDeath >= 70 & AgeDeath <= 79 ~ "70-79",
+                                            AgeDeath >= 80 ~ "80+",
                                             TRUE ~ NA)),
          Vital = as.factor(ifelse(VitalStatus == 0 & CVDDeathCause == 'CVD death','CVD death', 
                                   ifelse(VitalStatus == 0 & BCDeathCause == 'BC death', 'BC death', 
                                          ifelse(VitalStatus == 0, 'Other Death', 'Alive'
                                          ))))) %>% 
-  select(ydiag, FollowUpStart, yy_dlc, SurvivalTime, AgeDx, AgeFollowUpStart, AgeDxCat, AgeDeath, AgeDeathCat, Vital, Surgery, Radiotherapy, Chemotherapy, EncryptedID, FollowUpYears)
+  select(ydiag, FollowUpStart, yy_dlc, SurvivalTime, AgeDx, AgeFollowUpStart, AgeDxCat, AgeDeath, AgeDeathCat, AgeDeathCat2, Vital, Surgery, Radiotherapy, Chemotherapy, EncryptedID, FollowUpYears)
 
 
 # Reviewing exclusions
 cancer %>%   
   filter(Vital == "CVD death",
          yy_dlc < FollowUpStart) %>%
-  select(Vital, AgeDx, ydiag, yy_dlc, SurvivalTime, Surgery, Radiotherapy, Chemotherapy) %>%
-  View()
+  select(Vital, AgeDx, ydiag, yy_dlc, SurvivalTime, Surgery, Radiotherapy, Chemotherapy) %>% View()
+
+# Persons observated #21,596
+cancer_observated <- cancer %>%
+  filter(yy_dlc >= FollowUpStart) 
 ```
 
-```{r person-years}
+```{r person-years_by_years}
 # Crear datos CVD deaths in BC patients -----------------------------------------------
 cat("Follow up period needs to be contemplated: `Follow-up period will be defined beginning 1 year after their first primary BC diagnosis (to estimate treatment completion) until date of last contact, death, or end up study period (December 31, 2020), whichever came first.`")
-
-# Person years by age group for Global SMR calculation
-cvd_person_years <- cancer %>%
-  filter(yy_dlc >= FollowUpStart) %>%
-  select(FollowUpStart, yy_dlc, AgeFollowUpStart) %>%
-  group_by(yy_dlc) %>%
-  mutate(FollowUpYears = yy_dlc - FollowUpStart) %>%
-  summarize(PersonYears = sum(FollowUpYears))
-View(cvd_person_years)
-cat("We lost 28 patients due to death before the follow-up period started")
-
-
-# Person years by age group for Global SMR calculation
-cvd_person_years <- cancer %>%
-  filter(yy_dlc >= FollowUpStart) %>%
-  select(EncryptedID, FollowUpStart, yy_dlc, AgeFollowUpStart) %>% 
-  group_by(yy_dlc) %>%
-  mutate(FollowUpYears = yy_dlc - FollowUpStart,
-         AgeFollowUpEnd = AgeFollowUpStart + FollowUpYears) %>% View()
-         FollowUpYear_Cat = case_when(yy_dlc <= 2009 ~ "2005-2009", 
-                                      TRUE ~ NA)) %>%  View()
-  group_by(AgeDxCat) %>%
-  summarize(PersonYears = sum(FollowUpYears))
-View(cvd_person_years)
-cat("We lost 28 patients due to death before the follow-up period started")
-
-
-
-
-
-
-# Definir periodos de seguimiento
-periods <- list(
-  "2005-2009" = 2005:2009,
-  "2010-2014" = 2010:2014,
-  "2015-2019" = 2015:2019
-)
 
 # Definir categorías de edad
 age_categories <- function(age) {
@@ -134,31 +94,43 @@ age_categories <- function(age) {
   }
 }
 
-# Crear función para calcular los person-years por categoría de edad y periodo
-calc_person_years_periods <- function(id, start_year, end_year, start_age, follow_years) {
+age_categories2 <- function(age) {
+  if (age < 60) {
+    return("18-59")
+  } else if (age >= 60 & age < 70) {
+    return("60-69")
+  } else if (age >= 70 & age < 80) {
+    return("70-79")
+  } else {
+    return("80+")
+  }
+}
+
+# Crear función para calcular los person-years por categoría de edad para cada año
+calc_person_years_by_year <- function(id, start_year, end_year, start_age) {
   results <- data.frame()
   
-  for (period_name in names(periods)) {
-    period <- periods[[period_name]]
-    
-    # Determinar los años de seguimiento que caen en el periodo
-    follow_years_in_period <- period[period > start_year & period <= end_year]
+  # Solo proceder si el seguimiento es mayor a 0
+  if (end_year > start_year) {
+    # Iterar sobre los años en seguimiento
+    follow_years_in_period <- seq(start_year+1, end_year)
     
     if (length(follow_years_in_period) > 0) {
-      # Calcular la edad en esos años
+      # Calcular la edad en cada año
       ages <- start_age + (follow_years_in_period - start_year)
       
       # Asignar a la categoría de edad
       age_groups <- sapply(ages, age_categories)
+      age_groups2 <- sapply(ages, age_categories2)
       
-      # Contar los años por categoría de edad
-      for (age_group in unique(age_groups)) {
-        years_in_group <- sum(age_groups == age_group)
+      # Registrar los person-years por año y categoría de edad
+      for (i in seq_along(follow_years_in_period)) {
         results <- rbind(results, data.frame(
           ID = id,  # Incluir el ID
-          Period = period_name,
-          AgeGroup = age_group,
-          PersonYears = years_in_group
+          Year = follow_years_in_period[i],  # Año de seguimiento
+          AgeGroup = age_groups[i],  # Grupo de edad
+          AgeGroup2 = age_groups2[i],  # Grupo de edad
+          PersonYears = 1  # Cada fila es un año/persona
         ))
       }
     }
@@ -166,156 +138,181 @@ calc_person_years_periods <- function(id, start_year, end_year, start_age, follo
   return(results)
 }
 
-# Aplicar la función a cada persona con su ID
-person_years_list <- mapply(calc_person_years_periods, 
-                            cancer$EncryptedID, 
-                            cancer$FollowUpStart, 
-                            cancer$yy_dlc, 
-                            cancer$AgeFollowUpStart, 
-                            cancer$FollowUpYears, 
+# Aplicar la funciones a cada persona con su ID
+person_years_list_by_year <- mapply(calc_person_years_by_year, 
+                            cancer_observated$EncryptedID, 
+                            cancer_observated$FollowUpStart, 
+                            cancer_observated$yy_dlc, 
+                            cancer_observated$AgeFollowUpStart, 
                             SIMPLIFY = FALSE)
 
 # Unir los resultados en un solo data frame
-person_years_df <- do.call(rbind, person_years_list)
+person_years_bc <- do.call(rbind, person_years_list_by_year) 
 
-# Ver resultados
-View(person_years_df)
+person_years_bc %>%    
+  summarize(PersonYears = sum(PersonYears))
+#A total of 62,783 person-years 
 ```
 
-```{r CVD-deaths}
-# Age of death groups 18-59 y 60+
-cvd_deaths_BC_ageDeath <- cancer %>%
-  filter(Vital == "CVD death",
-         yy_dlc >= FollowUpStart) %>% # Deaths from CVD, deaths ocurred in the follow-up period
-  group_by(yy_dlc, AgeDeathCat) %>% # Grouped by year of death and age group
-  summarize(cvd_deaths_BC = n(), .groups = "drop") %>% # Counts
-  complete(yy_dlc, AgeDeathCat, fill = list(cvd_deaths_BC = 0)) %>% # Including 0s
-  bind_rows(
-    group_by(., yy_dlc) %>% # Getting counts by year overall
-      summarize(cvd_deaths_BC = sum(cvd_deaths_BC), .groups = "drop") %>%
-      mutate(AgeDeathCat = "Overall")
-  ) %>%
-  arrange(yy_dlc, AgeDeathCat) %>%
-  pivot_wider(names_from = AgeDeathCat, values_from = cvd_deaths_BC) %>% # Wide table by age group
-  rename(YearDeath = yy_dlc) %>% 
-  mutate(YearDeath = as.factor(YearDeath)) %>%
-  bind_rows(
-    summarise(., YearDeath = "All years", across(where(is.numeric), sum, na.rm = TRUE))
-  )
+```{r cvm_calculations}
+# CVM by year
+cvm_by_year <- cancer_observated %>%
+  filter(Vital == "CVD death", yy_dlc <= 2024) %>%  # Filtrar muertes por CVD en el período de seguimiento
+  group_by(yy_dlc) %>%  # Agrupar por año de muerte
+  summarize(cvd_deaths_BC = n(), .groups = "drop") %>%  # Contar muertes por año
+  bind_rows(data.frame(yy_dlc = c(2022, 2023), cvd_deaths_BC = c(0, 0))) %>%  # Añadir 2022 y 2023 con 0 muertes
+  arrange(yy_dlc) %>%  # Ordenar por año
+  rename(Year = yy_dlc) %>%  # Renombrar columna de año
+  left_join(person_years_bc %>%  # Unir con person years por año
+              group_by(Year) %>% 
+              summarize(PersonYears = sum(PersonYears)), 
+            by = "Year") %>% 
+  mutate(Year = as.character(Year)) %>%  # Convertir Year a character para combinar con "All years"
+  bind_rows(summarise(., Year = "All years", across(where(is.numeric), sum, na.rm = TRUE))) %>%  # Agregar total por todos los años
+  mutate(bc_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
+cvm_by_year
+  
+# CVM by periods
+cvm_by_period <- cancer_observated %>%
+  filter(Vital == "CVD death", yy_dlc <= 2024) %>%  # Filtrar muertes por CVD en el período de seguimiento
+  mutate(Period = case_when(yy_dlc > 2004 & yy_dlc < 2010 ~ "2005-2009",
+                            yy_dlc > 2009 & yy_dlc < 2015 ~ "2010-2014",
+                            yy_dlc > 2014 & yy_dlc < 2020 ~ "2015-2019",
+                            yy_dlc > 2019 & yy_dlc < 2025 ~ "2020-2024",
+                            TRUE ~ NA)) %>%
+  group_by(Period) %>%  # Agrupar por año de muerte
+  summarize(cvd_deaths_BC = n(), .groups = "drop") %>%    # Contar muertes por año
+  left_join(person_years_bc %>%  # Unir con person years por año
+              mutate(Period = case_when(Year > 2004 & Year < 2010 ~ "2005-2009",
+                            Year > 2009 & Year < 2015 ~ "2010-2014",
+                            Year > 2014 & Year < 2020 ~ "2015-2019",
+                            Year > 2019 & Year < 2025 ~ "2020-2024",
+                            TRUE ~ NA)) %>%
+              group_by(Period) %>% 
+              summarize(PersonYears = sum(PersonYears)), 
+            by = "Period") %>% 
+  mutate(Period = as.character(Period)) %>%  # 
+  bind_rows(summarise(., Period = "All years", across(where(is.numeric), sum, na.rm = TRUE))) %>%  # Agregar total por todos los años
+  mutate(bc_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
+cvm_by_period
 
-View(cvd_deaths_BC_ageDeath)
+# CVM by age categories (18-59, 60+)
+cvm_by_agegroup1 <- cancer_observated %>%
+  filter(Vital == "CVD death", yy_dlc <= 2024) %>%  # Filtrar muertes por CVD en el período de seguimiento
+  rename(AgeGroup = AgeDeathCat) %>% 
+  group_by(AgeGroup) %>%  # Agrupar por año de muerte
+  summarize(cvd_deaths_BC = n(), .groups = "drop") %>%    # Contar muertes por año
+  left_join(person_years_bc %>%  # Unir con person years por año
+              group_by(AgeGroup) %>% 
+              summarize(PersonYears = sum(PersonYears)), 
+            by = "AgeGroup") %>% 
+  mutate(AgeGroup = as.character(AgeGroup)) %>%  # 
+  bind_rows(summarise(., AgeGroup = "All ages", across(where(is.numeric), sum, na.rm = TRUE))) %>%  # Agregar total por todos los años
+  mutate(bc_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
+cvm_by_agegroup1
 
-# Age of diagnosis groups 18-59 y 60+
-cvd_deaths_BC_ageDiag <- cancer %>%
-  filter(Vital == "CVD death",
-         yy_dlc >= FollowUpStart) %>% # Deaths from CVD, deaths occurred in the follow-up period
-  group_by(ydiag, AgeDxCat) %>% # Grouped by year of diagnosis and age group
-  summarize(cvd_deaths_BC = n(), .groups = "drop") %>% # Counts
-  complete(ydiag, AgeDxCat, fill = list(cvd_deaths_BC = 0)) %>% # Including 0s
-  bind_rows(
-    group_by(., ydiag) %>% # Getting counts by year overall
-      summarize(cvd_deaths_BC = sum(cvd_deaths_BC), .groups = "drop") %>%
-      mutate(AgeDxCat = "Overall")
-  ) %>%
-  arrange(ydiag, AgeDxCat) %>%
-  pivot_wider(names_from = AgeDxCat, values_from = cvd_deaths_BC) %>% # Wide table by age group
-  rename(YearDiagnosis = ydiag) %>% 
-  mutate(YearDiagnosis = as.factor(YearDiagnosis)) %>%
-  bind_rows(
-    summarise(., YearDiagnosis = "All years", across(where(is.numeric), sum, na.rm = TRUE))
-  )
+# CVM by age categories (18-59, 60-69, 70-79, 80+)
+cvm_by_agegroup2 <- cancer_observated %>%
+  filter(Vital == "CVD death", yy_dlc <= 2024) %>%  # Filtrar muertes por CVD en el período de seguimiento
+  rename(AgeGroup2 = AgeDeathCat2) %>% 
+  group_by(AgeGroup2) %>%  # Agrupar por año de muerte
+  summarize(cvd_deaths_BC = n(), .groups = "drop") %>%    # Contar muertes por año
+  left_join(person_years_bc %>%  # Unir con person years por año
+              group_by(AgeGroup2) %>% 
+              summarize(PersonYears = sum(PersonYears)), 
+            by = "AgeGroup2") %>% 
+  mutate(AgeGroup2 = as.character(AgeGroup2)) %>%  # 
+  bind_rows(summarise(., AgeGroup2 = "All ages", across(where(is.numeric), sum, na.rm = TRUE))) %>%  # Agregar total por todos los años
+  mutate(bc_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
+cvm_by_agegroup2
 
-View(cvd_deaths_BC_ageDiag)
+# CVM by year and age categories (18-59, 60+)
+cvm_by_year_agegroup1 <- cancer_observated %>%
+  filter(Vital == "CVD death", yy_dlc <= 2024) %>%  # Filtrar muertes por CVD en el período de seguimiento
+  rename(AgeGroup = AgeDeathCat) %>% 
+  group_by(yy_dlc, AgeGroup) %>%  # Agrupar por año de muerte
+  summarize(cvd_deaths_BC = n(), .groups = "drop") %>%  # Contar muertes por año
+  bind_rows(data.frame(yy_dlc = c(2011, 2022, 2022, 2023, 2023), AgeGroup = c("18-59", "18-59", "60+", "18-59", "60+"), cvd_deaths_BC = c(0, 0,0, 0, 0))) %>%  
+  rename(Year = yy_dlc) %>%  # Renombrar columna de año
+  left_join(person_years_bc %>%  # Unir con person years por año
+              group_by(Year, AgeGroup) %>% 
+              summarize(PersonYears = sum(PersonYears)), 
+            by = c("Year", "AgeGroup")) %>% 
+  mutate(Year = as.character(Year)) %>%  # Convertir Year a character para combinar con "All years"
+  bind_rows(summarise(., Year = "All years", AgeGroup = "All ages", across(where(is.numeric), sum, na.rm = TRUE))) %>%  # Agregar total por todos los años
+  mutate(bc_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
+cvm_by_year_agegroup1
+
+# CVM by year and age categories (18-59, 60-69, 70-79, 80+)
+cvm_by_year_agegroup2 <- cancer_observated %>%
+  filter(Vital == "CVD death", yy_dlc <= 2024) %>%  # Filtrar muertes por CVD en el período de seguimiento
+  rename(AgeGroup2 = AgeDeathCat2) %>% 
+  group_by(yy_dlc, AgeGroup2) %>%  # Agrupar por año de muerte
+  summarize(cvd_deaths_BC = n(), .groups = "drop") %>%   # Contar muertes por año
+  bind_rows(data.frame(yy_dlc = c(2011, 2022, 2022, 2022, 2022, 2023, 2023, 2023, 2023), 
+                       AgeGroup2 = c("18-59", "18-59", "60-69", "70-79", "80+", "18-59", "60-69", "70-79", "80+"), 
+                       cvd_deaths_BC = c(0, 0,0, 0, 0, 0,0,0,0))) %>%  
+  rename(Year = yy_dlc) %>%  # Renombrar columna de año
+  left_join(person_years_bc %>%  # Unir con person years por año
+              group_by(Year, AgeGroup2) %>% 
+              summarize(PersonYears = sum(PersonYears)), 
+            by = c("Year", "AgeGroup2")) %>% 
+  mutate(Year = as.character(Year)) %>%  # Convertir Year a character para combinar con "All years"
+  bind_rows(summarise(., Year = "All years", AgeGroup2 = "All ages", across(where(is.numeric), sum, na.rm = TRUE))) %>%  
+  mutate(bc_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
+cvm_by_year_agegroup2
+
+# CVM by period and age categories (18-59, 60+)
+cvm_by_period_agegroup1 <- cancer_observated %>%
+  filter(Vital == "CVD death", yy_dlc <= 2024) %>%  # Filtrar muertes por CVD en el período de seguimiento
+  mutate(Period = case_when(yy_dlc > 2004 & yy_dlc < 2010 ~ "2005-2009",
+                            yy_dlc > 2009 & yy_dlc < 2015 ~ "2010-2014",
+                            yy_dlc > 2014 & yy_dlc < 2020 ~ "2015-2019",
+                            yy_dlc > 2019 & yy_dlc < 2025 ~ "2020-2024",
+                            TRUE ~ NA)) %>%
+  rename(AgeGroup = AgeDeathCat) %>% 
+  group_by(Period, AgeGroup) %>%  # Agrupar por año de muerte
+  summarize(cvd_deaths_BC = n(), .groups = "drop") %>% # Contar muertes por año
+  left_join(
+    person_years_bc %>%
+      mutate(Period = case_when(Year > 2004 & Year < 2010 ~ "2005-2009",
+                                Year > 2009 & Year < 2015 ~ "2010-2014",
+                                Year > 2014 & Year < 2020 ~ "2015-2019",
+                                Year > 2019 & Year < 2025 ~ "2020-2024",
+                                TRUE ~ NA)) %>%
+      group_by(Period, AgeGroup) %>%
+      summarize(PersonYears = sum(PersonYears), .groups = "drop"), 
+    by = c("Period", "AgeGroup")) %>% 
+  mutate(Period = as.character(Period)) %>%  # Convertir Year a character para combinar con "All years"
+  bind_rows(summarise(., Period = "All years", AgeGroup = "All ages", across(where(is.numeric), sum, na.rm = TRUE))) %>%  
+  mutate(bc_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
+cvm_by_period_agegroup1
+
+# CVM by year and age categories (18-59, 60-69, 70-79, 80+)
+cvm_by_period_agegroup2 <- cancer_observated %>%
+  filter(Vital == "CVD death", yy_dlc <= 2024) %>%  # Filtrar muertes por CVD en el período de seguimiento
+  mutate(Period = case_when(yy_dlc > 2004 & yy_dlc < 2010 ~ "2005-2009",
+                            yy_dlc > 2009 & yy_dlc < 2015 ~ "2010-2014",
+                            yy_dlc > 2014 & yy_dlc < 2020 ~ "2015-2019",
+                            yy_dlc > 2019 & yy_dlc < 2025 ~ "2020-2024",
+                            TRUE ~ NA)) %>%
+  rename(AgeGroup2 = AgeDeathCat2) %>% 
+  group_by(Period, AgeGroup2) %>%  # Agrupar por año de muerte
+  summarize(cvd_deaths_BC = n(), .groups = "drop") %>% # Contar muertes por año
+  left_join(
+    person_years_bc %>%
+      mutate(Period = case_when(Year > 2004 & Year < 2010 ~ "2005-2009",
+                                Year > 2009 & Year < 2015 ~ "2010-2014",
+                                Year > 2014 & Year < 2020 ~ "2015-2019",
+                                Year > 2019 & Year < 2025 ~ "2020-2024",
+                                TRUE ~ NA)) %>%
+      group_by(Period, AgeGroup2) %>%
+      summarize(PersonYears = sum(PersonYears), .groups = "drop"), 
+    by = c("Period", "AgeGroup2")) %>% 
+  mutate(Period = as.character(Period)) %>%  # Convertir Year a character para combinar con "All years"
+  bind_rows(summarise(., Period = "All years", AgeGroup2 = "All ages", across(where(is.numeric), sum, na.rm = TRUE))) %>%  
+  mutate(bc_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
+cvm_by_period_agegroup2
+
 ```
-
-```{r comments}
-# # Age groups 18-49 y 50+
-# cvd_deaths_BC_final2 <- cancer %>%
-#   filter(Vital == "CVD death",
-#          yy_dlc >= FollowUpStart) %>% # Deaths from CVD, deaths ocurred in the follow-up period
-#   group_by(yy_dlc, AgeDeathCat2) %>% # Grouped by year of death and age group
-#   summarize(cvd_deaths_BC = n(), .groups = "drop") %>% # Counts
-#   complete(yy_dlc, AgeDeathCat2, fill = list(cvd_deaths_BC = 0)) %>% # Including 0s
-#   bind_rows(
-#     group_by(., yy_dlc) %>% # Getting counts by year overall
-#       summarize(cvd_deaths_BC = sum(cvd_deaths_BC), .groups = "drop") %>%
-#       mutate(AgeDeathCat2 = "Overall")
-#   ) %>%
-#   arrange(yy_dlc, AgeDeathCat2) %>%
-#   pivot_wider(names_from = AgeDeathCat2, values_from = cvd_deaths_BC) %>% # Wide table by age group
-#   rename(YearDeath = yy_dlc) %>% 
-#   mutate(YearDeath = as.factor(YearDeath)) %>%
-#   bind_rows(
-#     summarise(., YearDeath = "All years", across(where(is.numeric), sum, na.rm = TRUE))
-#   )
-# 
-# View(cvd_deaths_BC_final2)
-# 
-# 
-# 
-# # Grupos de edad 18-64, 65-84 y 85+
-# cvd_deaths_BC_final3 <- cancer %>%
-#   filter(Vital == "CVD death",
-#          yy_dlc >= FollowUpStart) %>% # Deaths from CVD, deaths ocurred in the follow-up period
-#   group_by(yy_dlc, AgeDeathCat3) %>% # Grouped by year of death and age group
-#   summarize(cvd_deaths_BC = n(), .groups = "drop") %>% # Counts
-#   complete(yy_dlc, AgeDeathCat3, fill = list(cvd_deaths_BC = 0)) %>% # Including 0s
-#   bind_rows(
-#     group_by(., yy_dlc) %>% # Obtener counts por año overall
-#       summarize(cvd_deaths_BC = sum(cvd_deaths_BC), .groups = "drop") %>%
-#       mutate(AgeDeathCat3 = "Overall")
-#   ) %>%
-#   arrange(yy_dlc, AgeDeathCat3) %>%
-#   pivot_wider(names_from = AgeDeathCat3, values_from = cvd_deaths_BC) %>% # Wide table by age group
-#   rename(YearDeath = yy_dlc) %>% 
-#   mutate(YearDeath = as.factor(YearDeath)) %>%
-#   bind_rows(
-#     summarise(., YearDeath = "All years", across(where(is.numeric), sum, na.rm = TRUE))
-#   )
-# 
-# View(cvd_deaths_BC_final3)
-
-
-# Crear datos BC survivors ------------------------------------------------------------
-## Crear la tabla inicial agrupada por año y categoría de edad
-# BC_alive <- cancer %>%
-#   filter(Vital == "Alive") %>% 
-#   group_by(ydiag, AgeDeathCat) %>% 
-#   summarize(BC_alive = n()) 
-
-## Sumar los casos de todas las categorías de edad por año
-# BC_alive_overall <- BC_alive %>%
-#   group_by(ydiag) %>%
-#   summarize(BC_alive = sum(BC_alive)) %>%
-#   mutate(AgeDeathCat = "Overall") 
-
-## Combinar las tablas original y la de totales
-# BC_alive_final <- bind_rows(BC_alive, BC_alive_overall) %>%
-#   arrange(ydiag, AgeDeathCat)
-# 
-# rm(BC_alive, BC_alive_overall)
-
-
-# Crear un data frame con todas las categorías posibles de AgeDeathCat
-# all_categories <- expand.grid(
-#   yy_dlc = unique(BC_alive_final$yy_dlc),  # Todas las categorías posibles de yy_dlc
-#   AgeDeathCat = unique(BC_alive_final$AgeDeathCat) # Todas las categorías posibles de AgeDeathCat
-# )
-
-# Full Data ------------------------
-# BC_dat <- full_join(all_categories, cvd_deaths_BC_final, by = c("yy_dlc", "AgeDeathCat")) %>%
-#   full_join(BC_alive_final, by = c("yy_dlc", "AgeDeathCat")) %>%
-#   mutate(across(everything(), ~replace_na(.x, 0))) %>%
-#   arrange(yy_dlc, AgeDeathCat) %>% 
-#   mutate(cvd_deaths_BC_rate = (cvd_deaths_BC/BC_alive)*1000) %>% 
-#   filter(AgeDeathCat != "Unknown")
-# 
-# rm(all_categories, cvd_deaths_BC_final)
-# 
-# View(BC_dat)
-```
-
-
-
-
 
