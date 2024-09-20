@@ -1,6 +1,5 @@
 ---
-title: "Project: Cardiac death mortality on breast cancer patients (Dr. C Sanchez)"
-author: "Edwin Navarro - BBC Biostatistician"
+title: "Cardiac death mortality on breast cancer patients"
 date: "2024-06-19"
 output:
   html_document:
@@ -245,6 +244,10 @@ Assess mortality on breast cancer survivors caused by cardiovascular disease (CV
 
 Cancer Registry Data: The initial selection is all women residents in PR diagnosed with breast cancer (by microscopic confirmation) during the period 2005-2019. 
 
+NCHS Mortality Data for years 2004-2019.
+
+Census Population Estimates for years 2000-2023 for women residents in PR by age groups.
+
 #### <ins> B. Analysis Proposal: </ins>
 
 Below is the overall proposed analysis strategy to meet the study objectives: 
@@ -253,7 +256,7 @@ Below is the overall proposed analysis strategy to meet the study objectives:
 
 2. Estimate Standardized Mortality Ratios (SMR’s) with confidence intervals (Poisson-based CI’s) on the study population. Proposed SMR definition: observed number of CVD deaths among breast cancer patients divided by the expected number of CVD deaths in the matched general female population in PR.  
 
-3. Estimate Cumulative Incidence of Death (Cumulative Mortality) considering the effects of competing risks (Cardiac-related death vs Other/Breast Cancer-related death).
+3. Estimate Survival Curves, estimate Cumulative Incidence of Death (Cumulative Mortality) considering the effects of competing risks (Cardiac-related death vs Other/Breast Cancer-related death) using Competing Risks Regression (HRs).
 
 ### **II. Descriptive Analysis**
 
@@ -793,9 +796,12 @@ tidycmprsk::cuminc(Surv(time, statusV)~1, data) %>%
   ggcuminc(outcome = c("1", "2","3"))+
   ylim(c(0, .5)) +
   xlim(c(0,20))+
-  labs(x = "Survival Time (Years)") + 
+  labs(x = "Survival Time (Years)") +
+  add_confidence_interval(show.legend = FALSE) +
+  scale_fill_manual(
+  values = c("1" = "red", "2" = "pink", "3" = "black"))+  # Show legend for lines
   scale_color_manual(values = c("red", "pink", "black"),
-  labels = c("Cardiac death", "Breast cancer death", "Other cause of death"))
+  labels = c("Cardiac death", "Breast cancer death", "Other causes of death"))
 
 
 ```
@@ -809,7 +815,7 @@ way3 <- tidy(tidycmprsk::cuminc(Surv(time, statusV)~1, data)) %>%
   filter(time %in% c(5,10,15)) %>%
   mutate(value= paste0(100 * round(estimate,4), '(',100*round(conf.low,4), '-',100*round(conf.high,4), ')' ),
          outcome = ifelse(outcome == '1','CVD Death',
-                          ifelse(outcome == '2', 'BC Death', 'Other Cause Death')))%>%
+                          ifelse(outcome == '2', 'BC Death', 'Other Causes of Death')))%>%
   select(time, outcome, value)%>%
   pivot_wider(values_from = value, names_from = time)%>%
   rename(`5-year (95% CI)` = `5`,
@@ -832,20 +838,19 @@ kable(way3,  format = "html", escape = FALSE, align = "c")%>%
 
 
 ```{r echo=FALSE, fig.height=8, fig.width=12, message=FALSE, warning=FALSE, paged.print=FALSE}
+options("ggsurvfit.switch-color-linetype" = FALSE)
 
 # CIF for CVD by Treatment 
-
 tidycmprsk::cuminc(Surv(time, status2) ~ Procedure, data) %>% 
-  ggcuminc(outcome = c( "1"), size = 1)+
- #add_confidence_interval() +
- #add_risktable() +
-  ylim(c(0, .1)) + 
+  ggcuminc(outcome = c("1"), size = 1, aes(color = Procedure)) + 
+ # geom_step(aes(color = Procedure)) + 
+ # ylim(c(0, .1)) + 
   labs(
     x = "Survival Time (Years)",
     title = 'CIF for CVD by Treatment'
   ) + 
-  xlim(c(0,20)) +
-  scale_color_manual(values = RColorBrewer::brewer.pal(n = 9, name = "Set1")) 
+  xlim(c(0, 20)) +
+  scale_color_manual(values = RColorBrewer::brewer.pal(n = 9, name = "Set1"))  # Use Set1 color palette
 
 
 ```
@@ -856,8 +861,7 @@ tidycmprsk::cuminc(Surv(time, status2) ~ Procedure, data) %>%
 # CIF for CVD by Age Category 
 
 tidycmprsk::cuminc(Surv(time, status2) ~ AgeCat, data) %>% 
-  ggcuminc(outcome = c( "1"),
-           linetype_aes = TRUE, size = 1)+
+  ggcuminc(outcome = c( "1"), aes(color = AgeCat), size = 1)+
  #add_confidence_interval() +
  #add_risktable() +
   ylim(c(0, .1)) + 
@@ -878,7 +882,7 @@ tidycmprsk::cuminc(Surv(time, status2) ~ AgeCat, data) %>%
 
 tidycmprsk::cuminc(Surv(time, statusV) ~ Comorb.cat , data) %>% 
   ggcuminc(outcome = c("1"),
-           linetype_aes = TRUE, size = 1)+
+            aes(color = Comorb.cat), size = 1)+
  #add_confidence_interval() +
  #add_risktable() +
   ylim(c(0, .5)) + 
@@ -899,7 +903,7 @@ tidycmprsk::cuminc(Surv(time, statusV) ~ Comorb.cat , data) %>%
 
 tidycmprsk::cuminc(Surv(time, statusV) ~ Comorb.cat , data) %>% 
   ggcuminc(outcome = c("2"),
-           linetype_aes = TRUE, size = 1)+
+           aes(color = Comorb.cat), size = 1)+
     ylim(c(0, .5)) + 
  #add_confidence_interval() +
  #add_risktable() +
@@ -914,12 +918,13 @@ tidycmprsk::cuminc(Surv(time, statusV) ~ Comorb.cat , data) %>%
 *Figure 21: Cumulative incidence curves for CVD and BC Mortality by Comorbidity* 
 
 ```{r echo=FALSE,fig.height=8, fig.width=12, message=FALSE, warning=FALSE, paged.print=FALSE}
+options("ggsurvfit.switch-color-linetype" = TRUE)
 
 # CIF for CVD by Comorbidity 
 
 tidycmprsk::cuminc(Surv(time, statusV) ~ Comorb.cat , data) %>% 
   ggcuminc(outcome = c("1", "2"),
-           linetype_aes = TRUE, size = 1)+
+           aes(color = Comorb.cat), size = 1)+
  #add_confidence_interval() +
  #add_risktable() +
   ylim(c(0, .5)) + 
@@ -941,12 +946,13 @@ tidycmprsk::cuminc(Surv(time, statusV) ~ Comorb.cat , data) %>%
 *Figure 22: Cumulative incidence curves for CVD Mortality by Stage at Diagnosis* 
 
 ```{r echo=FALSE, fig.height=8, fig.width=12, message=FALSE, warning=FALSE, paged.print=FALSE}
+options("ggsurvfit.switch-color-linetype" = FALSE)
 
 # CIF for CVD by cancer Stage at Diagnosis 
 
 tidycmprsk::cuminc(Surv(time, statusV) ~ StageAtDx , data) %>% 
   ggcuminc(outcome = c( "1"),
-           linetype_aes = TRUE, size = 1)+
+           aes(color = StageAtDx), size = 1)+
  #add_confidence_interval() +
  #add_risktable() +
     ylim(c(0, .8)) + 
@@ -966,7 +972,7 @@ tidycmprsk::cuminc(Surv(time, statusV) ~ StageAtDx , data) %>%
 
 tidycmprsk::cuminc(Surv(time, statusV) ~ StageAtDx , data) %>% 
   ggcuminc(outcome = c( "2"),
-           linetype_aes = TRUE, size = 1)+
+          aes(color = StageAtDx), size = 1)+
  #add_confidence_interval() +
  #add_risktable() +
   ylim(c(0, .8)) + 
@@ -981,21 +987,19 @@ tidycmprsk::cuminc(Surv(time, statusV) ~ StageAtDx , data) %>%
 *Figure 24: Cumulative incidence curves for CVD and BC Mortality by Stage at Diagnosis* 
 
 ```{r echo=FALSE, fig.height=8, fig.width=12, message=FALSE, warning=FALSE, paged.print=FALSE}
+options("ggsurvfit.switch-color-linetype" = FALSE)
 
 # CIF for CVD and BC by cancer Stage at Diagnosis 
-
-tidycmprsk::cuminc(Surv(time, statusV) ~ StageAtDx , data) %>% 
-  ggcuminc(outcome = c("1", "2"),
-           linetype_aes = TRUE, size = 1)+
- #add_confidence_interval() +
- #add_risktable() +
+tidycmprsk::cuminc(Surv(time, statusV) ~ StageAtDx, data) %>% 
+  ggcuminc(outcome = c("1", "2"), #linetype_aes = TRUE,
+            size = 1) +  # Use linetype for outcomes
   ylim(c(0, .8)) +
   labs(
     x = "Survival Time (Years)",
     title = 'CIF for Cardiovascular Disease and Breast Cancer by Stage at Diagnosis'
   ) + 
-  xlim(c(0,20)) + scale_color_manual(values = c("red", "pink"),
-                        labels = c("Cardiovascular disease", "Breast Cancer"))
+  xlim(c(0, 20)) 
+
 ```
 
 #### <ins>A. Competing Risks Regression </ins> 
