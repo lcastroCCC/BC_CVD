@@ -19,7 +19,62 @@ library(tidyr)
 
 ```
 
-```{r data_wrangling, include = FALSE, cache = TRUE}
+```{r wrangling_census}
+
+census <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Datos censales/Intercensal_female_age_grp_est_2000-2023.csv")
+}, error = function(e) {
+   read.csv("~/Downloads/NCHS/Intercensal_female_age_grp_est_2000-2023-2.csv")
+}))
+
+census <- census %>%
+  mutate(Age_Groups = case_when(
+    Age_Group %in% c(".18 to 24 years", ".25 to 44 years", ".45 to 49 years", ".50 to 54 years", ".55 to 59 years") ~ "18-59",
+    Age_Group %in% c(".60 to 64 years", ".65 to 69 years", ".70 to 74 years", 
+                     ".75 to 79 years", "70-79", ".80 to 84 years", ".85 years and over") ~ "60+"
+  ),
+  Age_Groups2 = case_when(
+    Age_Group %in% c(".18 to 24 years", ".25 to 44 years", ".45 to 49 years", ".50 to 54 years", ".55 to 59 years") ~ "18-59",
+    Age_Group %in% c(".60 to 64 years", ".65 to 69 years") ~ "60-69",
+    Age_Group %in% c(".70 to 74 years", ".75 to 79 years") ~ "70-79",
+    Age_Group %in% c(".80 to 84 years", ".85 years and over") ~ "80+"
+  )) %>%
+  relocate(Age_Groups, Age_Groups2) %>%
+  mutate_at(4:27, ~ gsub(",", "", .)) %>%
+  mutate_at(4:27, as.numeric) 
+
+census1 <- census %>%
+  filter(!is.na(Age_Groups)) %>%
+  select(-c(Age_Group, Age_Groups2)) %>%
+  group_by(Age_Groups) %>%
+  summarise(across(everything(), sum, na.rm = TRUE)) %>%
+  pivot_longer(
+    cols = -Age_Groups,   # Pivot all columns except 'age_group'
+    names_to = "Year",   # The new column for the year names
+    values_to = "Population"  # The new column for the values
+  ) %>%
+  mutate(Year = gsub("X", "", Year)) %>% 
+  relocate(Year) %>%
+  arrange(Year, Age_Groups)
+
+
+census2 <- census %>%
+  filter(!is.na(Age_Groups2)) %>%
+  select(-c(Age_Group, Age_Groups)) %>%
+  group_by(Age_Groups2) %>%
+  summarise(across(everything(), sum, na.rm = TRUE)) %>%
+  pivot_longer(
+    cols = -Age_Groups2,   # Pivot all columns except 'age_group'
+    names_to = "Year",   # The new column for the year names
+    values_to = "Population"  # The new column for the values
+  ) %>%
+  mutate(Year = gsub("X", "", Year)) %>% 
+  relocate(Year) %>%
+  arrange(Year, Age_Groups2)
+
+```
+
+```{r nchs_data_wrangling, include = FALSE, cache = TRUE}
 
 year <- "2005 - 2020" 
   
@@ -83,13 +138,13 @@ cvd_deaths_no_BC <- mort %>%
 
 ```
 
-```{r loading_grouped_cvd_bc, echo = FALSE}
+```{r loading_grouped_cvd_BC, echo = FALSE}
 
 # Reading file grouped by year and age groups 0-59, 60+
 cvm_by_year_agegroup1 <- suppressWarnings(tryCatch({
   read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
   mutate(Year = as.numeric(Year))
-}, error = function(e) {}, error = function(e) {}, error = function(e) {
+}, error = function(e) {
    read.csv("~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
   mutate(Year = as.numeric(Year))
 }))
@@ -108,18 +163,17 @@ cvm_by_year_agegroup2 <- suppressWarnings(tryCatch({
 ```{r joining_cvd_gen_with_cvd_bc, echo = FALSE}
 
 grouped_cvd_deaths_gen <- cvd_deaths_no_BC %>% group_by(current_data_year, AgeDeathCat) %>% count(); grouped_cvd_deaths_gen
-clean_n_cvd_deaths_gen <- left_join(grouped_cvd_deaths_gen, cvm_by_year_agegroup1[, c("Year", "AgeGroup", "cvd_deaths_BC")], 
+clean_n_cvd_deaths_gen <- left_join(grouped_cvd_deaths_gen, cvm_by_year_agegroup1[, c("Year", "AgeGroup", "cvd_deaths_BC", "PersonYears")], 
           join_by("current_data_year" == "Year",
                   "AgeDeathCat" == "AgeGroup")) %>%
   replace_na(list(cvd_deaths_BC = 0)) %>%
   mutate(NewN = (n - cvd_deaths_BC),
          current_data_year = as.character(current_data_year)) %>%
   select(-c(n, cvd_deaths_BC)) %>%
-  rename(n = NewN); 
-  clean_n_cvd_deaths_gen
+  rename(n = NewN); clean_n_cvd_deaths_gen
 
 grouped_cvd_deaths_gen2 <- cvd_deaths_no_BC %>% group_by(current_data_year, AgeDeathCat2) %>% count(); grouped_cvd_deaths_gen2
-clean_n_cvd_deaths_gen2 <- left_join(grouped_cvd_deaths_gen2, cvm_by_year_agegroup2[, c("Year", "AgeGroup2", "cvd_deaths_BC")], 
+clean_n_cvd_deaths_gen2 <- left_join(grouped_cvd_deaths_gen2, cvm_by_year_agegroup2[, c("Year", "AgeGroup2", "cvd_deaths_BC", "PersonYears")], 
           join_by("current_data_year" == "Year",
                   "AgeDeathCat2" == "AgeGroup2")) %>%
     replace_na(list(cvd_deaths_BC = 0)) %>%
@@ -131,70 +185,46 @@ mutate(NewN = (n - cvd_deaths_BC),
 
 ```
 
-```{r wrangling_census}
+```{r rates}
 
-census <- suppressWarnings(tryCatch({
-  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Datos censales/Intercensal_female_age_grp_est_2000-2023.csv")
-}, error = function(e) {
-   read.csv("~/Downloads/NCHS/Intercensal_female_age_grp_est_2000-2023-2.csv")
-}))
-
-census <- census %>%
-  mutate(Age_Groups = case_when(
-    Age_Group %in% c(".18 to 24 years", ".25 to 44 years", ".45 to 49 years", ".50 to 54 years", ".55 to 59 years") ~ "18-59",
-    Age_Group %in% c(".60 to 64 years", ".65 to 69 years", ".70 to 74 years", 
-                     ".75 to 79 years", "70-79", ".80 to 84 years", ".85 years and over") ~ "60+"
-  ),
-  Age_Groups2 = case_when(
-    Age_Group %in% c(".18 to 24 years", ".25 to 44 years", ".45 to 49 years", ".50 to 54 years", ".55 to 59 years") ~ "18-59",
-    Age_Group %in% c(".60 to 64 years", ".65 to 69 years") ~ "60-69",
-    Age_Group %in% c(".70 to 74 years", ".75 to 79 years") ~ "70-79",
-    Age_Group %in% c(".80 to 84 years", ".85 years and over") ~ "80+"
-  )) %>%
-  relocate(Age_Groups, Age_Groups2) %>%
-  mutate_at(4:27, ~ gsub(",", "", .)) %>%
-  mutate_at(4:27, as.numeric) 
-
-census1 <- census %>%
-  filter(!is.na(Age_Groups)) %>%
-  select(-c(Age_Group, Age_Groups2)) %>%
-  group_by(Age_Groups) %>%
-  summarise(across(everything(), sum, na.rm = TRUE)) %>%
-  pivot_longer(
-    cols = -Age_Groups,   # Pivot all columns except 'age_group'
-    names_to = "Year",   # The new column for the year names
-    values_to = "Population"  # The new column for the values
-  ) %>%
-  mutate(Year = gsub("X", "", Year)) %>% 
-  relocate(Year) %>%
-  arrange(Year, Age_Groups)
+cvd_rates_gen1 <- left_join(clean_n_cvd_deaths_gen, census1, by = c("current_data_year" = "Year",
+                                                "AgeDeathCat" = "Age_Groups")) %>%
+  replace_na(list(PersonYears = 0)) %>%
+  mutate(Population2 = (Population - PersonYears)) %>%
+  select(-c(Population, PersonYears)) %>%
+  rename(Population = Population2) %>%
+  mutate(gen_cvd_rate = n/Population*1000); cvd_rates_gen1
 
 
-census2 <- census %>%
-  filter(!is.na(Age_Groups2)) %>%
-  select(-c(Age_Group, Age_Groups)) %>%
-  group_by(Age_Groups2) %>%
-  summarise(across(everything(), sum, na.rm = TRUE)) %>%
-  pivot_longer(
-    cols = -Age_Groups2,   # Pivot all columns except 'age_group'
-    names_to = "Year",   # The new column for the year names
-    values_to = "Population"  # The new column for the values
-  ) %>%
-  mutate(Year = gsub("X", "", Year)) %>% 
-  relocate(Year) %>%
-  arrange(Year, Age_Groups2)
+
+cvd_rates_gen2 <- left_join(clean_n_cvd_deaths_gen2, census2, by = c("current_data_year" = "Year",
+                                                "AgeDeathCat2" = "Age_Groups2")) %>%
+  replace_na(list(PersonYears = 0)) %>%
+  mutate(Population2 = (Population - PersonYears)) %>%
+  select(-c(Population, PersonYears)) %>%
+  rename(Population = Population2) %>%
+  mutate(gen_cvd_rate = n/Population*1000); cvd_rates_gen2
+
 
 ```
 
-```{r rates}
+```{r exporting_gen_pop_rates, echo = FALSE}
 
-left_join(clean_n_cvd_deaths_gen, census1, by = c("current_data_year" = "Year",
-                                                "AgeDeathCat" = "Age_Groups")) %>%
-  mutate(CVD_rate = n/Population*1000)
+# Exporting general population rates by age groups 0-59 and 60+
 
-left_join(clean_n_cvd_deaths_gen2, census2, by = c("current_data_year" = "Year",
-                                                "AgeDeathCat2" = "Age_Groups2")) %>%
-  mutate(CVD_rate = n/Population*1000)
+tryCatch({
+  write.csv(cvd_rates_gen1, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones", "cvm_rate_gen_pop1.csv")
+}, error = function(e) {
+  write.csv(cvd_rates_gen1, "~/Downloads/NCHS/cvm_rate_gen_pop1.csv")
+})
+
+# Exporting general population rates by age groups 0-59, 60-69, 70-79, 80+
+
+tryCatch({
+  write.csv(cvd_rates_gen2, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones", "cvm_rate_gen_pop2.csv")
+}, error = function(e) {
+  write.csv(cvd_rates_gen2, "~/Downloads/NCHS/cvm_rate_gen_pop2.csv")
+})
 
 ```
 

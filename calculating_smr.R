@@ -3,6 +3,43 @@
 
 # Manual calculation ------------------------------------------------------
 
+
+gen_1 <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/cvm_rate_gen_pop1.csv")
+}, error = function(e) {
+  read.csv("~/Downloads/NCHS/cvm_rate_gen_pop1.csv")
+}))
+
+# Exporting general population rates by age groups 0-59, 60-69, 70-79, 80+
+
+gen_2 <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/cvm_rate_gen_pop2.csv")
+}, error = function(e) {
+  read.csv("~/Downloads/NCHS/cvm_rate_gen_pop2.csv")
+}))
+
+# Reading file grouped by year and age groups 0-59, 60+
+cvm_by_year_agegroup1 <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
+    mutate(Year = as.numeric(Year))
+}, error = function(e) {
+  read.csv("~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
+    mutate(Year = as.numeric(Year))
+}))
+
+# Reading file grouped by year and age groups 0-59, 60-69, 70-79, 80+
+cvm_by_year_agegroup2 <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
+    mutate(Year = as.numeric(Year))
+}, error = function(e) {
+  read.csv("~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
+    mutate(Year = as.numeric(Year))
+}))
+
+left_join(gen_1, cvm_by_year_agegroup1, by = c("current_data_year" = "Year",
+                                                  "AgeDeathCat" = "AgeGroup")) %>% View()
+
+
 # Example dataframe with age-specific population of breast cancer survivors and general CVD mortality rates
 df <- data.frame(
   age_group = c("18-44", "45-64", "65-84", "85+"),

@@ -359,66 +359,6 @@ display: none;
 
 <p>This data is necessary so we can get the CVD death rates for non BC
 survivors in the standard population</p>
-<pre><code>## # A tibble: 32 × 3
-## # Groups:   current_data_year, AgeDeathCat [32]
-##    current_data_year AgeDeathCat     n
-##                &lt;dbl&gt; &lt;fct&gt;       &lt;int&gt;
-##  1              2005 18-59         195
-##  2              2005 60+          2214
-##  3              2006 18-59         186
-##  4              2006 60+          2223
-##  5              2007 18-59         179
-##  6              2007 60+          2209
-##  7              2008 18-59         155
-##  8              2008 60+          2115
-##  9              2009 18-59         165
-## 10              2009 60+          2010
-## # ℹ 22 more rows</code></pre>
-<pre><code>## # A tibble: 32 × 3
-## # Groups:   current_data_year, AgeDeathCat [32]
-##    current_data_year AgeDeathCat     n
-##    &lt;chr&gt;             &lt;chr&gt;       &lt;int&gt;
-##  1 2005              18-59          NA
-##  2 2005              60+            NA
-##  3 2006              18-59         181
-##  4 2006              60+          2215
-##  5 2007              18-59         178
-##  6 2007              60+          2199
-##  7 2008              18-59         152
-##  8 2008              60+          2107
-##  9 2009              18-59         163
-## 10 2009              60+          2000
-## # ℹ 22 more rows</code></pre>
-<pre><code>## # A tibble: 64 × 3
-## # Groups:   current_data_year, AgeDeathCat2 [64]
-##    current_data_year AgeDeathCat2     n
-##                &lt;dbl&gt; &lt;fct&gt;        &lt;int&gt;
-##  1              2005 18-59          195
-##  2              2005 60-69          262
-##  3              2005 70-79          492
-##  4              2005 80+           1460
-##  5              2006 18-59          186
-##  6              2006 60-69          271
-##  7              2006 70-79          496
-##  8              2006 80+           1456
-##  9              2007 18-59          179
-## 10              2007 60-69          269
-## # ℹ 54 more rows</code></pre>
-<pre><code>## # A tibble: 64 × 3
-## # Groups:   current_data_year, AgeDeathCat2 [64]
-##    current_data_year AgeDeathCat2     n
-##    &lt;chr&gt;             &lt;chr&gt;        &lt;int&gt;
-##  1 2005              18-59           NA
-##  2 2005              60-69           NA
-##  3 2005              70-79           NA
-##  4 2005              80+             NA
-##  5 2006              18-59          181
-##  6 2006              60-69          270
-##  7 2006              70-79          492
-##  8 2006              80+           1453
-##  9 2007              18-59          178
-## 10 2007              60-69          268
-## # ℹ 54 more rows</code></pre>
 <pre class="r"><code>census &lt;- suppressWarnings(tryCatch({
   read.csv(&quot;C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Datos censales/Intercensal_female_age_grp_est_2000-2023.csv&quot;)
 }, error = function(e) {
@@ -479,41 +419,109 @@ census1 &lt;- census %&gt;%
   mutate(Year = gsub(&quot;X&quot;, &quot;&quot;, Year)) %&gt;% 
   relocate(Year) %&gt;%
   arrange(Year, Age_Groups2)</code></pre>
-<pre class="r"><code>left_join(clean_n_cvd_deaths_gen, census1, by = c(&quot;current_data_year&quot; = &quot;Year&quot;,
+<pre><code>## # A tibble: 32 × 3
+## # Groups:   current_data_year, AgeDeathCat [32]
+##    current_data_year AgeDeathCat     n
+##                &lt;dbl&gt; &lt;fct&gt;       &lt;int&gt;
+##  1              2005 18-59         195
+##  2              2005 60+          2214
+##  3              2006 18-59         186
+##  4              2006 60+          2223
+##  5              2007 18-59         179
+##  6              2007 60+          2209
+##  7              2008 18-59         155
+##  8              2008 60+          2115
+##  9              2009 18-59         165
+## 10              2009 60+          2010
+## # ℹ 22 more rows</code></pre>
+<pre><code>## # A tibble: 32 × 4
+## # Groups:   current_data_year, AgeDeathCat [32]
+##    current_data_year AgeDeathCat PersonYears     n
+##    &lt;chr&gt;             &lt;chr&gt;             &lt;int&gt; &lt;int&gt;
+##  1 2005              18-59                NA   195
+##  2 2005              60+                  NA  2214
+##  3 2006              18-59               437   181
+##  4 2006              60+                 527  2215
+##  5 2007              18-59               783   178
+##  6 2007              60+                1113  2199
+##  7 2008              18-59               954   152
+##  8 2008              60+                1465  2107
+##  9 2009              18-59              1128   163
+## 10 2009              60+                1930  2000
+## # ℹ 22 more rows</code></pre>
+<pre><code>## # A tibble: 64 × 3
+## # Groups:   current_data_year, AgeDeathCat2 [64]
+##    current_data_year AgeDeathCat2     n
+##                &lt;dbl&gt; &lt;fct&gt;        &lt;int&gt;
+##  1              2005 18-59          195
+##  2              2005 60-69          262
+##  3              2005 70-79          492
+##  4              2005 80+           1460
+##  5              2006 18-59          186
+##  6              2006 60-69          271
+##  7              2006 70-79          496
+##  8              2006 80+           1456
+##  9              2007 18-59          179
+## 10              2007 60-69          269
+## # ℹ 54 more rows</code></pre>
+<pre><code>## # A tibble: 64 × 4
+## # Groups:   current_data_year, AgeDeathCat2 [64]
+##    current_data_year AgeDeathCat2 PersonYears     n
+##    &lt;chr&gt;             &lt;chr&gt;              &lt;int&gt; &lt;int&gt;
+##  1 2005              18-59                 NA   195
+##  2 2005              60-69                 NA   262
+##  3 2005              70-79                 NA   492
+##  4 2005              80+                   NA  1460
+##  5 2006              18-59                437   181
+##  6 2006              60-69                234   270
+##  7 2006              70-79                184   492
+##  8 2006              80+                  109  1453
+##  9 2007              18-59                783   178
+## 10 2007              60-69                505   268
+## # ℹ 54 more rows</code></pre>
+<pre class="r"><code>cvd_rates_gen1 &lt;- left_join(clean_n_cvd_deaths_gen, census1, by = c(&quot;current_data_year&quot; = &quot;Year&quot;,
                                                 &quot;AgeDeathCat&quot; = &quot;Age_Groups&quot;)) %&gt;%
-  mutate(CVD_rate = n/Population*1000)</code></pre>
+  replace_na(list(PersonYears = 0)) %&gt;%
+  mutate(Population2 = (Population - PersonYears)) %&gt;%
+  select(-c(Population, PersonYears)) %&gt;%
+  rename(Population = Population2) %&gt;%
+  mutate(gen_cvd_rate = n/Population*1000); cvd_rates_gen1</code></pre>
 <pre><code>## # A tibble: 32 × 5
 ## # Groups:   current_data_year, AgeDeathCat [32]
-##    current_data_year AgeDeathCat     n Population CVD_rate
-##    &lt;chr&gt;             &lt;chr&gt;       &lt;int&gt;      &lt;dbl&gt;    &lt;dbl&gt;
-##  1 2005              18-59          NA    1116336   NA    
-##  2 2005              60+            NA     371788   NA    
-##  3 2006              18-59         181    1108699    0.163
-##  4 2006              60+          2215     382575    5.79 
-##  5 2007              18-59         178    1099454    0.162
-##  6 2007              60+          2199     393576    5.59 
-##  7 2008              18-59         152    1091501    0.139
-##  8 2008              60+          2107     404319    5.21 
-##  9 2009              18-59         163    1083120    0.150
-## 10 2009              60+          2000     414894    4.82 
+##    current_data_year AgeDeathCat     n Population gen_cvd_rate
+##    &lt;chr&gt;             &lt;chr&gt;       &lt;int&gt;      &lt;dbl&gt;        &lt;dbl&gt;
+##  1 2005              18-59         195    1116336        0.175
+##  2 2005              60+          2214     371788        5.96 
+##  3 2006              18-59         181    1108262        0.163
+##  4 2006              60+          2215     382048        5.80 
+##  5 2007              18-59         178    1098671        0.162
+##  6 2007              60+          2199     392463        5.60 
+##  7 2008              18-59         152    1090547        0.139
+##  8 2008              60+          2107     402854        5.23 
+##  9 2009              18-59         163    1081992        0.151
+## 10 2009              60+          2000     412964        4.84 
 ## # ℹ 22 more rows</code></pre>
-<pre class="r"><code>left_join(clean_n_cvd_deaths_gen2, census2, by = c(&quot;current_data_year&quot; = &quot;Year&quot;,
+<pre class="r"><code>cvd_rates_gen2 &lt;- left_join(clean_n_cvd_deaths_gen2, census2, by = c(&quot;current_data_year&quot; = &quot;Year&quot;,
                                                 &quot;AgeDeathCat2&quot; = &quot;Age_Groups2&quot;)) %&gt;%
-  mutate(CVD_rate = n/Population*1000)</code></pre>
+  replace_na(list(PersonYears = 0)) %&gt;%
+  mutate(Population2 = (Population - PersonYears)) %&gt;%
+  select(-c(Population, PersonYears)) %&gt;%
+  rename(Population = Population2) %&gt;%
+  mutate(gen_cvd_rate = n/Population*1000); cvd_rates_gen2</code></pre>
 <pre><code>## # A tibble: 64 × 5
 ## # Groups:   current_data_year, AgeDeathCat2 [64]
-##    current_data_year AgeDeathCat2     n Population CVD_rate
-##    &lt;chr&gt;             &lt;chr&gt;        &lt;int&gt;      &lt;dbl&gt;    &lt;dbl&gt;
-##  1 2005              18-59           NA    1116336   NA    
-##  2 2005              60-69           NA     183309   NA    
-##  3 2005              70-79           NA     118780   NA    
-##  4 2005              80+             NA      69699   NA    
-##  5 2006              18-59          181    1108699    0.163
-##  6 2006              60-69          270     189773    1.42 
-##  7 2006              70-79          492     121175    4.06 
-##  8 2006              80+           1453      71627   20.3  
-##  9 2007              18-59          178    1099454    0.162
-## 10 2007              60-69          268     196559    1.36 
+##    current_data_year AgeDeathCat2     n Population gen_cvd_rate
+##    &lt;chr&gt;             &lt;chr&gt;        &lt;int&gt;      &lt;dbl&gt;        &lt;dbl&gt;
+##  1 2005              18-59          195    1116336        0.175
+##  2 2005              60-69          262     183309        1.43 
+##  3 2005              70-79          492     118780        4.14 
+##  4 2005              80+           1460      69699       20.9  
+##  5 2006              18-59          181    1108262        0.163
+##  6 2006              60-69          270     189539        1.42 
+##  7 2006              70-79          492     120991        4.07 
+##  8 2006              80+           1453      71518       20.3  
+##  9 2007              18-59          178    1098671        0.162
+## 10 2007              60-69          268     196054        1.37 
 ## # ℹ 54 more rows</code></pre>
 <pre class="r"><code># # CVD deaths excluding all cancer related deaths
 # cvd_deaths_no_cancer &lt;- mort %&gt;%
