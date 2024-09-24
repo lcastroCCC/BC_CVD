@@ -15,12 +15,13 @@ in the standard population
 library(readxl)
 library(gtsummary)
 library(dplyr)
+library(tidyr)
 
 ```
 
 ```{r data_wrangling, include = FALSE, cache = TRUE}
 
-year <- "2006" 
+year <- "2005 - 2020" 
   
 # Loading dataframe
 paths <- c(paste0("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/NCHS/Procesadas/Listas/", year, ".xlsx"),
@@ -57,7 +58,7 @@ mort <- mort %>%
          
 ```
 
-```{r CVD_deaths_women, echo = FALSE}
+```{r filtering_cvd_gen, echo = FALSE}
 
 # CVD deaths excluding breast cancer related deaths
 cvd_deaths_no_BC <- mort %>%
@@ -66,6 +67,7 @@ cvd_deaths_no_BC <- mort %>%
          detail_age >= 18 &
            detail_age != 999, # 18 years +
          sex == "F", # Female
+         current_data_year != 2004, # Removing deaths outside follow-up period
          grepl("^I(0|1[1,3]|2|3|4|5[0,1]|6|7[0-8])", `icd_code_10_th_revision`), # CVD fatalities
          !grepl("^C50", `2_nd_condition`)|
            !grepl("^C50", `3_rd_condition`)) %>% # Excluding BC fatalities 
@@ -81,64 +83,63 @@ cvd_deaths_no_BC <- mort %>%
 
 ```
 
-```{r}
-cvm_by_year_agegroup1 <- read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de C�ncer/Data/cvm_by_year_agegroup1.csv") %>%
+```{r loading_grouped_cvd_bc, echo = FALSE}
+
+# Reading file grouped by year and age groups 0-59, 60+
+cvm_by_year_agegroup1 <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
   mutate(Year = as.numeric(Year))
-cvm_by_year_agegroup2 <- read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de C�ncer/Data/cvm_by_year_agegroup2.csv") %>%
+}, error = function(e) {}, error = function(e) {}, error = function(e) {
+   read.csv("~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
   mutate(Year = as.numeric(Year))
+}))
+
+# Reading file grouped by year and age groups 0-59, 60-69, 70-79, 80+
+cvm_by_year_agegroup2 <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
+  mutate(Year = as.numeric(Year))
+}, error = function(e) {
+   read.csv("~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
+  mutate(Year = as.numeric(Year))
+}))
 
 ```
 
-```{r summary_tables}
+```{r joining_cvd_gen_with_cvd_bc, echo = FALSE}
 
-# Version 1
 grouped_cvd_deaths_gen <- cvd_deaths_no_BC %>% group_by(current_data_year, AgeDeathCat) %>% count(); grouped_cvd_deaths_gen
 clean_n_cvd_deaths_gen <- left_join(grouped_cvd_deaths_gen, cvm_by_year_agegroup1[, c("Year", "AgeGroup", "cvd_deaths_BC")], 
           join_by("current_data_year" == "Year",
                   "AgeDeathCat" == "AgeGroup")) %>%
+  replace_na(list(cvd_deaths_BC = 0)) %>%
   mutate(NewN = (n - cvd_deaths_BC),
          current_data_year = as.character(current_data_year)) %>%
   select(-c(n, cvd_deaths_BC)) %>%
-  rename(n = NewN)
-clean_n_cvd_deaths_gen
+  rename(n = NewN); 
+  clean_n_cvd_deaths_gen
 
-clean_n_cvd_deaths_gen2 <- cvd_deaths_no_BC %>% group_by(current_data_year, AgeDeathCat2) %>% count(); clean_n_cvd_deaths_gen2
-clean_n_cvd_deaths_gen2 <- left_join(clean_n_cvd_deaths_gen2, cvm_by_year_agegroup2[, c("Year", "AgeGroup2", "cvd_deaths_BC")], 
+grouped_cvd_deaths_gen2 <- cvd_deaths_no_BC %>% group_by(current_data_year, AgeDeathCat2) %>% count(); grouped_cvd_deaths_gen2
+clean_n_cvd_deaths_gen2 <- left_join(grouped_cvd_deaths_gen2, cvm_by_year_agegroup2[, c("Year", "AgeGroup2", "cvd_deaths_BC")], 
           join_by("current_data_year" == "Year",
                   "AgeDeathCat2" == "AgeGroup2")) %>%
-  mutate(NewN = (n - cvd_deaths_BC),
+    replace_na(list(cvd_deaths_BC = 0)) %>%
+mutate(NewN = (n - cvd_deaths_BC),
          current_data_year = as.character(current_data_year)) %>%
   select(-c(n, cvd_deaths_BC)) %>%
-  rename(n = NewN)
-clean_n_cvd_deaths_gen2
+  rename(n = NewN); clean_n_cvd_deaths_gen2
 
-# Version 2
-cvd_deaths_no_BC %>%
- tbl_summary(include = AgeDeathCat, by = current_data_year,
-             statistic = list(
-      all_continuous() ~ "{mean} ({sd})",
-      all_categorical() ~ "{n} ({p}%)"
-    ))  %>%
-  modify_caption("**Table 1: Cardiovascular disease related deaths in women who resided in Puerto Rico by age group**") %>%
-  modify_footnote(
-    everything() ~ "Deaths were classified according to the underlying cause of death on the death certificate."
-  )
-
-cvd_deaths_no_BC %>%
- tbl_summary(include = AgeDeathCat2, by = current_data_year,
-             statistic = list(
-      all_continuous() ~ "{mean} ({sd})",
-      all_categorical() ~ "{n} ({p}%)"
-    )) %>%
-  modify_caption("**Table 1: Cardiovascular disease related deaths in women who resided in Puerto Rico by age group**") %>%
-  modify_footnote(
-    everything() ~ "Deaths were classified according to the underlying cause of death on the death certificate."
-  )
 
 ```
 
-```{r census}
-census <- read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Datos censales/Intercensal_female_age_grp_est_2000-2023.csv") %>%
+```{r wrangling_census}
+
+census <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Datos censales/Intercensal_female_age_grp_est_2000-2023.csv")
+}, error = function(e) {
+   read.csv("~/Downloads/NCHS/Intercensal_female_age_grp_est_2000-2023-2.csv")
+}))
+
+census <- census %>%
   mutate(Age_Groups = case_when(
     Age_Group %in% c(".18 to 24 years", ".25 to 44 years", ".45 to 49 years", ".50 to 54 years", ".55 to 59 years") ~ "18-59",
     Age_Group %in% c(".60 to 64 years", ".65 to 69 years", ".70 to 74 years", 
