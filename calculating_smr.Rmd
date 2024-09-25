@@ -6,19 +6,14 @@ editor_options:
   chunk_output_type: console
 ---
 
-```{r libraries, echo = FALSE}
+```{r libraries, include = FALSE}
+
+library(readxl)
+library(dplyr)
 
 ```
 
 ```{r loading_gen_pop_rates, echo = FALSE}
-
-# Reading general population rates by age groups 0-59, 60+
-
-gen_1 <- suppressWarnings(tryCatch({
-  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/cvm_rate_gen_pop1.csv")
-}, error = function(e) {
-  read.csv("~/Downloads/NCHS/cvm_rate_gen_pop1.csv")
-}))
 
 # Reading general population rates by age groups 0-59, 60-69, 70-79, 80+
 
@@ -30,16 +25,7 @@ gen_2 <- suppressWarnings(tryCatch({
 
 ```
 
-````{r loading_BC_rates}
-
-# Reading file grouped by year and age groups 0-59, 60+
-cvm_by_year_agegroup1 <- suppressWarnings(tryCatch({
-  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
-    mutate(Year = as.numeric(Year))
-}, error = function(e) {
-  read.csv("~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
-    mutate(Year = as.numeric(Year))
-}))
+```{r loading_BC_rates}
 
 # Reading file grouped by year and age groups 0-59, 60-69, 70-79, 80+
 cvm_by_year_agegroup2 <- suppressWarnings(tryCatch({
@@ -50,23 +36,136 @@ cvm_by_year_agegroup2 <- suppressWarnings(tryCatch({
     mutate(Year = as.numeric(Year))
 }))
 
+```
+
+```{r year_filtering}
+
+# Temporary filter for testing
+gen_2 <- gen_2 %>% filter(current_data_year == 2006)
 
 ```
 
-````{r merging_gen_pop_with_BC}
+```{r table_a}
 
-left_join(gen_1, cvm_by_year_agegroup1, by = c("current_data_year" = "Year",
-                                                  "AgeDeathCat" = "AgeGroup")) %>%
-  select(current_data_year, AgeDeathCat, )
+table_a_2 <- left_join(gen_2, cvm_by_year_agegroup2, by = c("current_data_year" = "Year",
+                                                            "AgeDeathCat2" = "AgeGroup2")) %>%
+  select(current_data_year, AgeDeathCat2, n, Population, gen_cvd_rate, cvd_deaths_BC, PersonYears, cvd_rate) %>%
+  rename(gen_cvd_deaths = n,
+         gen_population = Population,
+         bc_cvd_deaths = cvd_deaths_BC,
+         bc_personyears = PersonYears,
+         bc_cvd_rate = cvd_rate ) %>%
+  mutate(bc_cvd_rate = round(bc_cvd_rate, 2),
+         gen_cvd_rate = round(gen_cvd_rate, 2)); table_a_2
 
 ```
 
-````{r}
+```{r table_b}
+
+table_b_2 <- table_a_2 %>%
+  select(current_data_year, AgeDeathCat2, bc_personyears, gen_cvd_rate, bc_cvd_deaths) %>%
+  mutate(expected_deaths = bc_personyears * (gen_cvd_rate / 1000)) %>%
+  relocate(expected_deaths, .before = bc_cvd_deaths); table_b_2
+
+```
+
+```{r table_c}
+
+table_c_2 <- data.frame(year = 2006,
+             type = c("Observed", "Expected"),
+             number_of_deaths = c(sum(table_b_2$bc_cvd_deaths), sum(table_b_2$expected_deaths)),
+             person_time_at_risk = sum(table_b_2$bc_personyears)) %>%
+             mutate(rate_per_100py = number_of_deaths/ person_time_at_risk * 1000); table_c_2
+
+```
+
+```{r SMRs}
+
+SMR2 <- table_c_2$rate_per_100py[1]/ table_c_2$rate_per_100py[2]; SMR2
+
+```
+
+```{r archive, include = FALSE}
+
+
+# while this seems okay, table C seems to be a total sum of age groups  
+# table_c_1 <- table_b_1 %>%
+#   group_by(current_data_year) %>%
+#   mutate(Type = c(sum(bc_cvd_deaths), expected_deaths = sum(expected_deaths)),
+#             bc_personyears = sum(bc_personyears)) %>%
+#   mutate(person_time_at_risk = bc_personyears, 
+#          rate_per_1000py = observed_deaths/ bc_personyears * 1000); table_c_1
+#   select(expected_deaths, bc_personyears) %>%
+#   mutate(expected_rate = expected_deaths / bc_personyears * 1000); table_c_1
+
+# tables_c_1 <- table_a_1 %>%
+#   select(current_data_year, AgeDeathCat, bc_personyears, gen_cvd_rate, bc_cvd_deaths, bc_cvd_rate) %>%
+#   mutate(expected_rate = round(bc_personyears*gen_cvd_rate, 2)/ 1000) %>%
+#   rename(observed_rate = bc_cvd_rate) %>%
+#   mutate(observed_rate = round(observed_rate, 2)); tables_c_1
+# 
+# smr_years_1 <- tables_c_1 %>%
+#   select(current_data_year, AgeDeathCat, observed_rate, expected_rate) %>%
+#   mutate(smr = observed_rate/expected_rate); smr_years_1
+
+
+# table_a_1 %>%
+#   summarise(bc_cvd_deaths = sum(bc_cvd_deaths, na.rm = TRUE), bc_personyears = sum(bc_personyears, na.rm = TRUE),
+#             gen_cvd_deaths = sum(gen_cvd_deaths, na.rm = TRUE), gen_personyears = sum(gen_population, na.rm = TRUE)) %>%
+#   mutate(gen_cvd_rate = (gen_cvd_deaths/ gen_personyears) * 1000,
+#          bc_cvd_rate = (bc_cvd_deaths/ bc_personyears) * 1000,
+#          expected_rate = round((bc_personyears * gen_cvd_rate) / 1000,2),
+#          smr = bc_cvd_rate/ expected_rate)
+#   
+# data.frame(Type = c("Observed", "Expected"),
+#            Number of deaths = c())
 
 
 ```
 
-````{r}
+```{r age_group_1, include = FALSE}
 
+# Reading general population rates by age groups 0-59, 60+
+
+gen_1 <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/cvm_rate_gen_pop1.csv")
+}, error = function(e) {
+  read.csv("~/Downloads/NCHS/cvm_rate_gen_pop1.csv")
+}))
+
+# Reading file grouped by year and age groups 0-59, 60+
+cvm_by_year_agegroup1 <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
+    mutate(Year = as.numeric(Year))
+}, error = function(e) {
+  read.csv("~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
+    mutate(Year = as.numeric(Year))
+}))
+
+gen_1 <- gen_1 %>% filter(current_data_year == 2006)
+
+table_a_1 <- left_join(gen_1, cvm_by_year_agegroup1, by = c("current_data_year" = "Year",
+                                                            "AgeDeathCat" = "AgeGroup")) %>%
+  select(current_data_year, AgeDeathCat, n, Population, gen_cvd_rate, cvd_deaths_BC, PersonYears, cvd_rate) %>%
+  rename(gen_cvd_deaths = n,
+         gen_population = Population,
+         bc_cvd_deaths = cvd_deaths_BC,
+         bc_personyears = PersonYears,
+         bc_cvd_rate = cvd_rate ) %>%
+  mutate(bc_cvd_rate = round(bc_cvd_rate, 2),
+         gen_cvd_rate = round(gen_cvd_rate, 2))
+
+table_b_1 <- table_a_1 %>%
+  select(current_data_year, AgeDeathCat, bc_personyears, gen_cvd_rate, bc_cvd_deaths) %>%
+  mutate(expected_deaths = bc_personyears * (gen_cvd_rate / 1000)) %>%
+  relocate(expected_deaths, .before = bc_cvd_deaths)
+
+table_c_1 <- data.frame(year = 2006,
+             type = c("Observed", "Expected"),
+             number_of_deaths = c(sum(table_b_1$bc_cvd_deaths), sum(table_b_1$expected_deaths)),
+             person_time_at_risk = sum(table_b_1$bc_personyears)) %>%
+             mutate(rate_per_100py = number_of_deaths/ person_time_at_risk * 1000)
+
+SMR1 <- table_c_1$rate_per_100py[1]/ table_c_1$rate_per_100py[2]
 
 ```

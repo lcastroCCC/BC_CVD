@@ -485,7 +485,7 @@ census1 &lt;- census %&gt;%
   mutate(Population2 = (Population - PersonYears)) %&gt;%
   select(-c(Population, PersonYears)) %&gt;%
   rename(Population = Population2) %&gt;%
-  mutate(gen_cvd_rate = n/Population*1000); cvd_rates_gen1</code></pre>
+  mutate(gen_cvd_rate = (n/ Population) * 1000); cvd_rates_gen1</code></pre>
 <pre><code>## # A tibble: 32 × 5
 ## # Groups:   current_data_year, AgeDeathCat [32]
 ##    current_data_year AgeDeathCat     n Population gen_cvd_rate
@@ -507,7 +507,7 @@ census1 &lt;- census %&gt;%
   mutate(Population2 = (Population - PersonYears)) %&gt;%
   select(-c(Population, PersonYears)) %&gt;%
   rename(Population = Population2) %&gt;%
-  mutate(gen_cvd_rate = n/Population*1000); cvd_rates_gen2</code></pre>
+  mutate(gen_cvd_rate = (n/ Population) * 1000); cvd_rates_gen2</code></pre>
 <pre><code>## # A tibble: 64 × 5
 ## # Groups:   current_data_year, AgeDeathCat2 [64]
 ##    current_data_year AgeDeathCat2     n Population gen_cvd_rate

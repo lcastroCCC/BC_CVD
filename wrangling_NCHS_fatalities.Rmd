@@ -193,7 +193,7 @@ cvd_rates_gen1 <- left_join(clean_n_cvd_deaths_gen, census1, by = c("current_dat
   mutate(Population2 = (Population - PersonYears)) %>%
   select(-c(Population, PersonYears)) %>%
   rename(Population = Population2) %>%
-  mutate(gen_cvd_rate = n/Population*1000); cvd_rates_gen1
+  mutate(gen_cvd_rate = (n/ Population) * 1000); cvd_rates_gen1
 
 
 
@@ -203,7 +203,7 @@ cvd_rates_gen2 <- left_join(clean_n_cvd_deaths_gen2, census2, by = c("current_da
   mutate(Population2 = (Population - PersonYears)) %>%
   select(-c(Population, PersonYears)) %>%
   rename(Population = Population2) %>%
-  mutate(gen_cvd_rate = n/Population*1000); cvd_rates_gen2
+  mutate(gen_cvd_rate = (n/ Population) * 1000); cvd_rates_gen2
 
 
 ```
