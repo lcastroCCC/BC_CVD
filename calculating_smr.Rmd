@@ -41,7 +41,7 @@ cvm_by_year_agegroup2 <- suppressWarnings(tryCatch({
 ```{r year_filtering}
 
 # Temporary filter for testing
-gen_2 <- gen_2 %>% filter(current_data_year == 2006)
+# gen_2 <- gen_2 %>% filter(current_data_year == 2006)
 
 ```
 
@@ -67,22 +67,43 @@ table_b_2 <- table_a_2 %>%
   mutate(expected_deaths = bc_personyears * (gen_cvd_rate / 1000)) %>%
   relocate(expected_deaths, .before = bc_cvd_deaths); table_b_2
 
+summed_table_b_2 <- table_b_2 %>%
+    group_by(current_data_year) %>%
+    summarise(
+        bc_cvd_deaths = sum(bc_cvd_deaths, na.rm = TRUE),  # Sum of observed deaths
+        expected_deaths = sum(expected_deaths, na.rm = TRUE), # Sum of expected deaths
+        bc_personyears = sum(bc_personyears, na.rm = TRUE)         # Sum of person-time at risk
+    )
+  
 ```
 
 ```{r table_c}
 
-table_c_2 <- data.frame(year = 2006,
-             type = c("Observed", "Expected"),
-             number_of_deaths = c(sum(table_b_2$bc_cvd_deaths), sum(table_b_2$expected_deaths)),
-             person_time_at_risk = sum(table_b_2$bc_personyears)) %>%
+table_c_2 <- data.frame(year = rep(summed_table_b_2$current_data_year, each = 2),
+             type_of_death = c("Observed", "Expected"),
+             number_of_deaths = unlist(mapply(c, summed_table_b_2$bc_cvd_deaths, summed_table_b_2$expected_deaths, SIMPLIFY = FALSE)),
+             person_time_at_risk = rep(summed_table_b_2$bc_personyears, each = 2)) %>%
              mutate(rate_per_100py = number_of_deaths/ person_time_at_risk * 1000); table_c_2
 
 ```
 
-```{r SMRs}
+```{r SMRs_by_year}
 
-SMR2 <- table_c_2$rate_per_100py[1]/ table_c_2$rate_per_100py[2]; SMR2
+smrs_by_year <- table_c_2 %>%
+  group_by(year) %>%
+  summarise(
+    smr = rate_per_100py[type_of_death == "Observed"] / rate_per_100py[type_of_death == "Expected"]); smrs_by_year
 
+```
+
+```{r global_SMR}
+smr_global <- table_c_2 %>%
+  group_by(type_of_death) %>%
+  summarise(total_deaths = sum(number_of_deaths, na.rm = TRUE),
+            total_person_time = sum(person_time_at_risk, na.rm = TRUE)) %>%
+  mutate(rate_per_100py = total_deaths/ total_person_time * 1000) %>%
+  summarise(
+    SMR = rate_per_100py[type_of_death == "Observed"] / rate_per_100py[type_of_death == "Expected"]); smr_global
 ```
 
 ```{r archive, include = FALSE}
