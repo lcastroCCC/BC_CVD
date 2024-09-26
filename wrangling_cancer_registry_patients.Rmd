@@ -170,7 +170,6 @@ cvm_by_year <- cancer_observed %>%
   mutate(Year = as.character(Year)) %>%  # Convertir Year a character para combinar con "All years"
   bind_rows(summarise(., Year = "All years", across(where(is.numeric), sum, na.rm = TRUE))) %>%  # Agregar total por todos los años
   mutate(cvd_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
-View(cvm_by_year)
   
 # CVM by periods
 cvm_by_period <- cancer_observed %>%
@@ -194,7 +193,6 @@ cvm_by_period <- cancer_observed %>%
   mutate(Period = as.character(Period)) %>%  # 
   bind_rows(summarise(., Period = "All years", across(where(is.numeric), sum, na.rm = TRUE))) %>%  # Agregar total por todos los años
   mutate(cvd_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
-cvm_by_period
 
 # CVM by age categories (18-59, 60+)
 cvm_by_agegroup1 <- cancer_observed %>%
@@ -209,7 +207,6 @@ cvm_by_agegroup1 <- cancer_observed %>%
   mutate(AgeGroup = as.character(AgeGroup)) %>%  # 
   bind_rows(summarise(., AgeGroup = "All ages", across(where(is.numeric), sum, na.rm = TRUE))) %>%  # Agregar total por todos los años
   mutate(cvd_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
-cvm_by_agegroup1
 
 # CVM by age categories (18-59, 60-69, 70-79, 80+)
 cvm_by_agegroup2 <- cancer_observed %>%
@@ -224,7 +221,6 @@ cvm_by_agegroup2 <- cancer_observed %>%
   mutate(AgeGroup2 = as.character(AgeGroup2)) %>%  # 
   bind_rows(summarise(., AgeGroup2 = "All ages", across(where(is.numeric), sum, na.rm = TRUE))) %>%  # Agregar total por todos los años
   mutate(cvd_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
-cvm_by_agegroup2
 
 # CVM by year and age categories (18-59, 60+)
 cvm_by_year_agegroup1 <- cancer_observed %>%
@@ -241,7 +237,6 @@ cvm_by_year_agegroup1 <- cancer_observed %>%
   mutate(Year = as.character(Year)) %>%  # Convertir Year a character para combinar con "All years"
   bind_rows(summarise(., Year = "All years", AgeGroup = "All ages", across(where(is.numeric), sum, na.rm = TRUE))) %>%  # Agregar total por todos los años
   mutate(cvd_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
-cvm_by_year_agegroup1
 
 # CVM by year and age categories (18-59, 60-69, 70-79, 80+)
 cvm_by_year_agegroup2 <- cancer_observed %>%
@@ -260,7 +255,6 @@ cvm_by_year_agegroup2 <- cancer_observed %>%
   mutate(Year = as.character(Year)) %>%  # Convertir Year a character para combinar con "All years"
   bind_rows(summarise(., Year = "All years", AgeGroup2 = "All ages", across(where(is.numeric), sum, na.rm = TRUE))) %>%  
   mutate(cvd_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
-cvm_by_year_agegroup2
 
 # CVM by period and age categories (18-59, 60+)
 cvm_by_period_agegroup1 <- cancer_observed %>%
@@ -286,7 +280,6 @@ cvm_by_period_agegroup1 <- cancer_observed %>%
   mutate(Period = as.character(Period)) %>%  # Convertir Year a character para combinar con "All years"
   bind_rows(summarise(., Period = "All years", AgeGroup = "All ages", across(where(is.numeric), sum, na.rm = TRUE))) %>%  
   mutate(cvd_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
-cvm_by_period_agegroup1
 
 # CVM by year and age categories (18-59, 60-69, 70-79, 80+)
 cvm_by_period_agegroup2 <- cancer_observed %>%
@@ -312,7 +305,6 @@ cvm_by_period_agegroup2 <- cancer_observed %>%
   mutate(Period = as.character(Period)) %>%  # Convertir Year a character para combinar con "All years"
   bind_rows(summarise(., Period = "All years", AgeGroup2 = "All ages", across(where(is.numeric), sum, na.rm = TRUE))) %>%  
   mutate(cvd_rate = (cvd_deaths_BC / PersonYears) * 1000)  # Calcular tasa por 1000 person-years
-cvm_by_period_agegroup2
 
 ```
 
@@ -323,6 +315,8 @@ tryCatch({
   write.csv(cvm_by_year_agegroup1, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data", "cvm_by_year_agegroup1.csv")
 }, error = function(e) {
   write.csv(cvm_by_year_agegroup1, "~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup1.csv")
+}, error = function(e) {
+  write.csv(cvm_by_year_agegroup1, "~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cvm_by_year_agegroup1.csv")
 })
 
 # Exporting file grouped by year and age groups 0-59, 60-69, 70-79, 80+
@@ -330,6 +324,8 @@ tryCatch({
   write.csv(cvm_by_year_agegroup2, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data", "cvm_by_year_agegroup2.csv")
 }, error = function(e) {
   write.csv(cvm_by_year_agegroup2, "~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup2.csv")
+}, error = function(e) {
+  write.csv(cvm_by_year_agegroup2, "~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cvm_by_year_agegroup2.csv")
 })
 
 ```
