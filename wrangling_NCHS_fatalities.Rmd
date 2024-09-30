@@ -170,19 +170,19 @@ cvd_deaths_gen <- mort %>%
 
 # Reading file grouped by year and age groups 0-59, 60+
 cvm_by_year_agegroup1 <- suppressWarnings(tryCatch({
-  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
   mutate(Year = as.numeric(Year))
 }, error = function(e) {
-   read.csv("~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
+   read.csv("~/Downloads/Registro Central de Cancer/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
   mutate(Year = as.numeric(Year))
 }))
 
 # Reading file grouped by year and age groups 0-59, 60-69, 70-79, 80+
 cvm_by_year_agegroup2 <- suppressWarnings(tryCatch({
-  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
   mutate(Year = as.numeric(Year))
 }, error = function(e) {
-   read.csv("~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
+   read.csv("~/Downloads/Registro Central de Cancer/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
   mutate(Year = as.numeric(Year))
 }))
 

@@ -29,10 +29,10 @@ gen_2 <- suppressWarnings(tryCatch({
 
 # Reading file grouped by year and age groups 0-59, 60-69, 70-79, 80+
 cvm_by_year_agegroup2 <- suppressWarnings(tryCatch({
-  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
     mutate(Year = as.numeric(Year))
 }, error = function(e) {
-  read.csv("~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
+  read.csv("~/Downloads/Registro Central de Cancer/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
     mutate(Year = as.numeric(Year))
 }))
 
@@ -92,11 +92,12 @@ table_c_2 <- data.frame(year = rep(summed_table_b_2$current_data_year, each = 2)
 smrs_by_year <- table_c_2 %>%
   group_by(year) %>%
   summarise(
-    smr = rate_per_100py[type_of_death == "Observed"] / rate_per_100py[type_of_death == "Expected"]); smrs_by_year
+    SMR = rate_per_100py[type_of_death == "Observed"] / rate_per_100py[type_of_death == "Expected"]); smrs_by_year
 
 ```
 
 ```{r global_SMR}
+
 smr_global <- table_c_2 %>%
   group_by(type_of_death) %>%
   summarise(total_deaths = sum(number_of_deaths, na.rm = TRUE),
@@ -104,6 +105,7 @@ smr_global <- table_c_2 %>%
   mutate(rate_per_100py = total_deaths/ total_person_time * 1000) %>%
   summarise(
     SMR = rate_per_100py[type_of_death == "Observed"] / rate_per_100py[type_of_death == "Expected"]); smr_global
+
 ```
 
 ```{r archive, include = FALSE}
