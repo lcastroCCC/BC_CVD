@@ -11,10 +11,13 @@ This data is necessary so we can get the CVD death rates for non BC survivors
 in the standard population
 
 ```{r libraries, include = FALSE}
+
 # Loading packages
+
 library(readxl)
 library(gtsummary)
 library(dplyr)
+library(purrr)
 library(tidyr)
 
 ```
@@ -76,47 +79,72 @@ census2 <- census %>%
 
 ```{r nchs_data_wrangling, include = FALSE, cache = TRUE}
 
-year <- "2005 - 2020" 
+# Define the range of years to be processed
+years <- 2005:2021
+
+# Define the common file paths using placeholders for the year
+paths <- c(
+  "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/NCHS/Procesadas/Listas/{year}.xlsx",
+  "~/Downloads/NCHS/{year}.xlsx",
+  "C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/NCHS/{year}.xlsx"
+)
+
+# Function to read and process each file
+read_and_process_file <- function(year) {
+  # Replace {year} with the current year in the paths
+  file_paths <- sapply(paths, function(path) gsub("\\{year\\}", year, path))
   
-# Loading dataframe
-paths <- c(paste0("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/NCHS/Procesadas/Listas/", year, ".xlsx"),
-           paste0("~/Downloads/NCHS/", year, ".xlsx"),
-           paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/NCHS/", year, ".xlsx"))
+  # Try to read the file from one of the possible paths
+  mort <- tryCatch({
+    read_excel(file_paths[1])
+  }, error = function(e) {
+    tryCatch({
+      read_excel(file_paths[2])
+    }, error = function(e) {
+      read_excel(file_paths[3])
+    })
+  })
+  
+  mort <- mort[rowSums(is.na(mort)) != ncol(mort),]
+  
+  # Process the dataframe: rename columns and select variables
+  mort_processed <- mort %>%
+    rename_all(~ snakecase::to_any_case(., case = "snake")) %>%
+    select(
+      record_type,
+      detail_age_unit, 
+      detail_age, 
+      sex,
+      icd_code_10_th_revision,
+      `1_st_condition`,
+      `2_nd_condition`,
+      `3_rd_condition`,
+      marital_status,
+      current_data_year
+    ) %>%
+    mutate(
+      record_type = as.numeric(record_type),  # Ensure these columns are numeric
+      detail_age_unit  = as.numeric(detail_age_unit), 
+      detail_age  = as.numeric(detail_age), 
+      current_data_year  = as.numeric(current_data_year), 
+      across(
+        c(icd_code_10_th_revision, `1_st_condition`, `2_nd_condition`, `3_rd_condition`), 
+        ~ sub("^(.{3})(.)", "\\1.\\2", .))) # Insert a period after the third character for any 4-character string
 
-# Attempt to read the file
-mort <- tryCatch({
-  read_excel(paths[1])
-}, error = function(e) {
-  read_excel(paths[2])
-}, error = function(e) {
-  read_excel(paths[3])
-})
+  # Return processed dataframe
+  return(mort_processed)
+}
 
-mort <- mort %>%
-  rename_all(~ snakecase::to_any_case(., case = "snake")) %>% 
-  select(record_type,
-         detail_age_unit, 
-         detail_age, # Age at death
-         sex,
-         icd_code_10_th_revision, # Underlying cause of death
-         `1_st_condition`,
-         `2_nd_condition`,
-         `3_rd_condition`,
-         marital_status,
-         current_data_year # Year of death
-         ) %>% 
-  mutate(across(c(icd_code_10_th_revision, `1_st_condition`, `2_nd_condition`, `3_rd_condition`), ~ sub("^(.{3})(.)", "\\1.\\2", .))) %>% # Insert a period after the third character for any 4-character string in `1_st_condition`
-  mutate(bcAny = ifelse(grepl("^C(50)", `icd_code_10_th_revision`)|
-           grepl("^C(50)", `2_nd_condition`)|
-           grepl("^C(50)", `3_rd_condition`), TRUE, FALSE)) # Diagnosis in any level
-       
+# Use purrr::map_dfr to apply the function to each year and bind the rows into a single dataframe
+mort <- map_dfr(years, read_and_process_file)
+
          
 ```
 
 ```{r filtering_cvd_gen, echo = FALSE}
 
 # CVD deaths excluding breast cancer related deaths
-cvd_deaths_no_BC <- mort %>%
+cvd_deaths_gen <- mort %>%
   filter(record_type == 1, # Resident of P.R.
          detail_age_unit == 1, # Age in years
          detail_age >= 18 &
@@ -142,19 +170,19 @@ cvd_deaths_no_BC <- mort %>%
 
 # Reading file grouped by year and age groups 0-59, 60+
 cvm_by_year_agegroup1 <- suppressWarnings(tryCatch({
-  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de CÃ¡ncer/Data/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
   mutate(Year = as.numeric(Year))
 }, error = function(e) {
-   read.csv("~/Downloads/Registro Central de CÃ¡ncer/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
+   read.csv("~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
   mutate(Year = as.numeric(Year))
 }))
 
 # Reading file grouped by year and age groups 0-59, 60-69, 70-79, 80+
 cvm_by_year_agegroup2 <- suppressWarnings(tryCatch({
-  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de CÃ¡ncer/Data/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
   mutate(Year = as.numeric(Year))
 }, error = function(e) {
-   read.csv("~/Downloads/Registro Central de CÃ¡ncer/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
+   read.csv("~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
   mutate(Year = as.numeric(Year))
 }))
 
@@ -162,7 +190,7 @@ cvm_by_year_agegroup2 <- suppressWarnings(tryCatch({
 
 ```{r joining_cvd_gen_with_cvd_bc, echo = FALSE}
 
-grouped_cvd_deaths_gen <- cvd_deaths_no_BC %>% group_by(current_data_year, AgeDeathCat) %>% count(); grouped_cvd_deaths_gen
+grouped_cvd_deaths_gen <- cvd_deaths_gen %>% group_by(current_data_year, AgeDeathCat) %>% count(); grouped_cvd_deaths_gen
 clean_n_cvd_deaths_gen <- left_join(grouped_cvd_deaths_gen, cvm_by_year_agegroup1[, c("Year", "AgeGroup", "cvd_deaths_BC", "PersonYears")], 
           join_by("current_data_year" == "Year",
                   "AgeDeathCat" == "AgeGroup")) %>%
@@ -172,7 +200,7 @@ clean_n_cvd_deaths_gen <- left_join(grouped_cvd_deaths_gen, cvm_by_year_agegroup
   select(-c(n, cvd_deaths_BC)) %>%
   rename(n = NewN); clean_n_cvd_deaths_gen
 
-grouped_cvd_deaths_gen2 <- cvd_deaths_no_BC %>% group_by(current_data_year, AgeDeathCat2) %>% count(); grouped_cvd_deaths_gen2
+grouped_cvd_deaths_gen2 <- cvd_deaths_gen %>% group_by(current_data_year, AgeDeathCat2) %>% count(); grouped_cvd_deaths_gen2
 clean_n_cvd_deaths_gen2 <- left_join(grouped_cvd_deaths_gen2, cvm_by_year_agegroup2[, c("Year", "AgeGroup2", "cvd_deaths_BC", "PersonYears")], 
           join_by("current_data_year" == "Year",
                   "AgeDeathCat2" == "AgeGroup2")) %>%
@@ -259,10 +287,10 @@ tryCatch({
 
 ```{r stats}
 
-mean(cvd_deaths_no_BC$detail_age)
-median(cvd_deaths_no_BC$detail_age)
+mean(cvd_deaths_gen$detail_age)
+median(cvd_deaths_gen$detail_age)
 
-hist(cvd_deaths_no_BC$detail_age, breaks = 115)
+hist(cvd_deaths_gen$detail_age, breaks = 115)
 ```
 
 ```{r quality_control, include = FALSE}
