@@ -10,6 +10,8 @@ editor_options:
 
 library(readxl)
 library(dplyr)
+library(mgcv)
+library(ggplot2)
 
 ```
 
@@ -92,7 +94,42 @@ table_c_2 <- data.frame(year = rep(summed_table_b_2$current_data_year, each = 2)
 smrs_by_year <- table_c_2 %>%
   group_by(year) %>%
   summarise(
-    SMR = rate_per_100py[type_of_death == "Observed"] / rate_per_100py[type_of_death == "Expected"]); smrs_by_year
+    SMR = rate_per_100py[type_of_death == "Observed"] / rate_per_100py[type_of_death == "Expected"],
+    se = sqrt(number_of_deaths[type_of_death == "Observed"]) / 
+         number_of_deaths[type_of_death == "Expected"],
+    ci_low = round(SMR - (1.96 * se), 2),
+    ci_high = round(SMR + (1.96 * se), 2),
+    ConfidenceInterval = ifelse(!is.na(ci_low),
+                                paste0("(", ci_low, " - ", ci_high, ")"),
+                                NA),
+    p_value = 2 * pnorm(-abs((SMR - 1) / se))
+  ) %>%
+  mutate(
+    p_value = ifelse(is.na(p_value), NA, 
+                           ifelse(p_value < 0.001, "< 0.001", as.character(round(p_value, 4))))
+  ) %>%
+  select(-c(se, ci_low, ci_high)); smrs_by_year
+
+
+```
+
+```{r SMRs_by_age_group}
+
+smrs_by_age <- table_b_2 %>%
+  group_by(AgeDeathCat2) %>%
+  summarise(
+    SMR = sum(bc_cvd_deaths, na.rm = TRUE) / sum(expected_deaths, na.rm = TRUE),
+    se = sqrt(sum(bc_cvd_deaths, na.rm = TRUE)) / sum(expected_deaths, na.rm = TRUE),
+    ci_low = round(SMR - (1.96 * se),2),
+ci_high = round(SMR + (1.96 * se),2),
+ConfidenceInterval = ifelse(!is.na(ci_low),
+                            paste0("(", ci_low, " - ", ci_high, ")"),
+                            NA),
+p_value = round(2 * pnorm(-abs((SMR - 1) / se)), 4),
+p_value = ifelse(p_value == 0,
+                 "< 0.001",
+                 p_value)) %>%
+  select( -c(se, ci_low,, ci_high)); smrs_by_age
 
 ```
 
@@ -104,7 +141,110 @@ smr_global <- table_c_2 %>%
             total_person_time = sum(person_time_at_risk, na.rm = TRUE)) %>%
   mutate(rate_per_100py = total_deaths/ total_person_time * 1000) %>%
   summarise(
-    SMR = rate_per_100py[type_of_death == "Observed"] / rate_per_100py[type_of_death == "Expected"]); smr_global
+    SMR = rate_per_100py[type_of_death == "Observed"] / rate_per_100py[type_of_death == "Expected"],
+    se = sqrt(total_deaths[type_of_death == "Observed"]) / 
+         total_deaths[type_of_death == "Expected"],
+    ci_low = round(SMR - (1.96 * se),2),
+ci_high = round(SMR + (1.96 * se),2),
+ConfidenceInterval = ifelse(!is.na(ci_low),
+                            paste0("(", ci_low, " - ", ci_high, ")"),
+                            NA),
+sig = ifelse(ci_low > 1 & 
+               ci_high > 1,
+             "*", NA)) %>%
+  select( -c(se, ci_low,, ci_high)); smr_global
+
+```
+
+```{r smr_practice}
+
+library(popEpi)
+library(Epi)
+
+smr_result <- sir(coh.data = table_a_2, coh.obs = 'bc_cvd_deaths', 
+                  coh.pyrs = 'bc_personyears', ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', adjust = c('AgeDeathCat2', 'current_data_year')); smr_result
+
+```
+
+```{r age_year_regression, include = FALSE}
+
+# Filter the data to remove rows with NA in any of the relevant columns
+filtered_data <- table_b_2[!is.na(table_b_2$current_data_year) & 
+                            !is.na(table_b_2$bc_cvd_deaths) & 
+                            !is.na(table_b_2$expected_deaths), ]
+filtered_data$AgeDeathCat2 <- factor(filtered_data$AgeDeathCat2, 
+                                     levels = rev(levels(factor(filtered_data$AgeDeathCat2))))
+# To have in mind:
+
+filtered_data %>% group_by(AgeDeathCat2) %>% summarise(var = sum(bc_cvd_deaths)/ sum(expected_deaths))
+
+# Fit a Poisson regression model
+regression <- glm(bc_cvd_deaths ~ current_data_year + AgeDeathCat2, 
+                  offset = log(expected_deaths),
+                  family = poisson, 
+                  data = filtered_data)
+
+
+# Summarize the model
+summary(regression)
+
+exp(summary(regression)$coefficients[, "Estimate"]) # For each additional year, the risk of death from breast cancer cardiovascular disease increases by approximately 12%. This suggests a positive trend in mortality over time.
+
+# Group 70 - 79's SMR is 89% higher than for reference
+# Group 60 - 69's SMR is 138% higher than for reference
+# Group 18 - 59's SMR is 517% higher than for reference
+
+# All else being equal (population sizes, year of diagnosis)
+
+# The model results suggest that even though older women (80+) may have a higher absolute number of CVD deaths, their rate relative to what is expected based on their population characteristics indicates a different risk pattern. The younger age group shows a more significant contrast in CVD death rates relative to expected deaths, highlighting potential disparities in mortality risk that merit further investigation.
+
+# There is an increasing trend in SMR over the years.
+# Younger age groups (especially those aged 18-59) have significantly higher SMRs compared to older age groups.
+
+summary(regression)$coefficients[, "Pr(>|z|)"] # There is very strong evidence that mortality increases with time.
+
+summary(regression)$deviance # The residual deviance of 219.81 indicates that there is still some variability in the data not explained by the model, but the deviance has been substantially reduced from the null deviance of 307.49.
+```
+
+```{r modeling_age_year_regression}
+
+# Create a data frame for plotting
+# Create the plot data frame
+plot_data <- data.frame(
+  current_data_year = filtered_data$current_data_year,
+  observed_deaths = filtered_data$bc_cvd_deaths,
+  expected_deaths = filtered_data$expected_deaths,
+  fitted_values = predict(regression, newdata = filtered_data, type = "response")
+)
+
+# Calculate confidence intervals for the fitted values
+# You can use the `predict()` function with se.fit = TRUE
+fit <- predict(regression, type = "link", se.fit = TRUE)
+
+# Back-transform to response scale (using the link function)
+fit_response <- exp(fit$fit)
+fit_se <- exp(fit$fit + qnorm(0.975) * fit$se.fit)  # Upper CI
+fit_se_lower <- exp(fit$fit - qnorm(0.975) * fit$se.fit)  # Lower CI
+
+# Add fitted values and confidence intervals to the data frame
+plot_data <- cbind(plot_data,
+                   lower_ci = fit_se_lower,
+                   upper_ci = fit_se)
+
+# Create the plot
+ggplot() +
+  geom_point(data = filtered_data, aes(x = current_data_year, y = bc_cvd_deaths, color = AgeDeathCat2), 
+             size = 3, shape = 16, alpha = 0.7) + 
+  geom_line(data = prediction_data, aes(x = current_data_year, y = fitted_values, color = AgeDeathCat2), size = 1) +
+  geom_ribbon(data = prediction_data, aes(x = current_data_year, ymin = lower_ci, ymax = upper_ci, fill = AgeDeathCat2), alpha = 0.2) +
+  labs(title = "Poisson Regression Model for CVD Deaths by Age Group",
+       x = "Year of Diagnosis",
+       y = "Number of Deaths") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1") +  # Use a color palette for better visibility
+  scale_fill_brewer(palette = "Set1")  # Fill for the ribbon
+
 
 ```
 
