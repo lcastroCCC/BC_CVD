@@ -139,9 +139,9 @@ smr_global <- table_c_2 %>%
   group_by(type_of_death) %>%
   summarise(total_deaths = sum(number_of_deaths, na.rm = TRUE),
             total_person_time = sum(person_time_at_risk, na.rm = TRUE)) %>%
-  mutate(rate_per_100py = total_deaths/ total_person_time * 1000) %>%
+  mutate(rate_per_1000py = total_deaths/ total_person_time * 1000) %>%
   summarise(
-    SMR = rate_per_100py[type_of_death == "Observed"] / rate_per_100py[type_of_death == "Expected"],
+    SMR = rate_per_1000py[type_of_death == "Observed"] / rate_per_1000py[type_of_death == "Expected"],
     se = sqrt(total_deaths[type_of_death == "Observed"]) / 
          total_deaths[type_of_death == "Expected"],
     ci_low = round(SMR - (1.96 * se),2),
@@ -149,9 +149,10 @@ ci_high = round(SMR + (1.96 * se),2),
 ConfidenceInterval = ifelse(!is.na(ci_low),
                             paste0("(", ci_low, " - ", ci_high, ")"),
                             NA),
-sig = ifelse(ci_low > 1 & 
-               ci_high > 1,
-             "*", NA)) %>%
+p_value = round(2 * pnorm(-abs((SMR - 1) / se)), 4),
+p_value = ifelse(p_value == 0,
+                 "< 0.001",
+                 p_value)) %>%
   select( -c(se, ci_low,, ci_high)); smr_global
 
 ```
@@ -160,11 +161,65 @@ sig = ifelse(ci_low > 1 &
 
 library(popEpi)
 library(Epi)
+library(data.table)  
 
-smr_result <- sir(coh.data = table_a_2, coh.obs = 'bc_cvd_deaths', 
-                  coh.pyrs = 'bc_personyears', ref.data = gen_2, 
-                  ref.rate = 'gen_cvd_rate', adjust = c('AgeDeathCat2', 'current_data_year')); smr_result
+# Population
 
+gen_2 <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/cvm_rate_gen_pop2.csv")
+}, error = function(e) {
+  read.csv("~/Downloads/NCHS/cvm_rate_gen_pop2.csv")
+}))
+gen_2 <- as.data.table(gen_2)
+setnames(gen_2, old = c("current_data_year", "AgeDeathCat2"), new = c("year", "agegroup"))
+gen_2[, fot := 1] 
+gen_2 <- gen_2[, .(fot, agegroup, year, n, Population, gen_cvd_rate)]
+gen_2[, agegroup := ifelse(agegroup == "80+", "80", 
+                                sub("([0-9]+)-([0-9]+)", "\\1", agegroup))]
+gen_2[, agegroup := as.numeric(agegroup)]
+gen_2[, gen_cvd_rate := gen_cvd_rate / 1000]
+
+
+# Cancer Registry
+
+paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_registry_20240924.csv",
+           "~/Downloads/Registro Central de Cancer/cancer_registry_20240924.csv",
+           paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_registry_20240924.csv"))
+
+cancer <- suppressWarnings(tryCatch({
+  read.csv(paths[1])
+}, error = function(e) {
+  read.csv(paths[2])
+}, error = function(e) {
+  read.csv(paths[3])
+}))
+cancer <- cancer %>% 
+  mutate(status = ifelse(VitalStatus == 0 & cancer$CVDDeathCause == "CVD death", 1, 0),
+         FollowUpStart = ydiag + 1,
+         FollowUpYears = yy_dlc - FollowUpStart,
+         birth_date = ydiag - AgeDx,
+         )
+cancer$status <- ifelse(cancer$VitalStatus == 0 & cancer$CVDDeathCause == 'CVD death',1, 0)
+cancer$birth_date <- cancer$ydiag - cancer$AgeDx
+# Assuming ydiag is the year and mm_dx is the month
+cancer$date_diag <- as.Date(paste(cancer$ydiag, cancer$mm_dx, "01", sep = "-"), format = "%Y-%m-%d")
+
+c <- lexpand(cancer, status = status, 
+             birth = birth_date, 
+             exit = yy_dlc, 
+             entry = ydiag,
+              breaks = list(per = 2004:2030, age = c(18, 60, 70, 80, Inf), fot = c(0:Inf)), 
+              aggre = list(fot, agegroup = age, year = per))
+
+
+
+smr_result <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', adjust = c('agegroup', 'year'), print ='year'); smr_result
+
+smr_result <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', adjust = c('agegroup', 'year'), print ='agegroup'); smr_result
 ```
 
 ```{r age_year_regression, include = FALSE}
