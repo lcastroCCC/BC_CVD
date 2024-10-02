@@ -152,9 +152,10 @@ person_years_list <- pmap(list(cancer_observed$EncryptedID,
 # Unir los resultados en un solo data frame
 person_years_bc <- bind_rows(person_years_list)
 
-person_years_bc %>% group_by(ID) %>% 
+person_years_bc %>% 
+  filter(Year < 2022) %>% 
   summarize(PersonYears = sum(PersonYears))
-#65,825.31
+# 65,091.93
 ```
 
 ```{r cvm_calculations}
@@ -164,7 +165,6 @@ cvm_by_year <- cancer_observed %>%
   group_by(yy_dlc) %>%  # Agrupar por año de muerte
   summarize(cvd_deaths_BC = n(), .groups = "drop") %>%   # Contar muertes por año
   bind_rows(data.frame(yy_dlc = 2005, cvd_deaths_BC = 0)) %>%  # Añadir 2022 y 2023 con 0 muertes
-  #complete(yy_dlc, fill = list(cvd_deaths_BC = 0)) %>%
   arrange(yy_dlc) %>%  # Ordenar por año
   rename(Year = yy_dlc) %>%  # Renombrar columna de año
   left_join(person_years_bc %>%  # Unir con person years por año
