@@ -1,5 +1,5 @@
 ---
-title: "Registro Central de Cáncer"
+title: "Registro Central de Cancer"
 
 output: html_document
 editor_options: 
@@ -18,9 +18,9 @@ library(tidyverse)
 
 ```{r data_wrangling,  cache = TRUE}
 # Paths
-paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cancer_registry_20240924.csv",
-           "~/Downloads/Registro Central de Cáncer/cancer_registry_20240924.csv",
-           paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_registry_20240924.csv"))
+paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_registry_20240924.csv",
+           "~/Downloads/Registro Central de Cancer/cancer_registry_20240924.csv",
+           paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cancer/cancer_registry_20240924.csv"))
 
 # Attempt to read the file
 cancer <- suppressWarnings(tryCatch({
@@ -314,20 +314,20 @@ cvm_by_period_agegroup2 <- cancer_observed %>%
 # Exporting file grouped by year and age groups 0-59 and 60+
 
 tryCatch({
-  write.csv(cvm_by_year_agegroup1, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup1.csv")
+  write.csv(cvm_by_year_agegroup1, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cvm_by_year_agegroup1.csv")
 }, error = function(e) {
-  write.csv(cvm_by_year_agegroup1, "~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup1.csv")
+  write.csv(cvm_by_year_agegroup1, "~/Downloads/Registro Central de Cancer/cvm_by_year_agegroup1.csv")
 }, error = function(e) {
-  write.csv(cvm_by_year_agegroup1, "~/../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cvm_by_year_agegroup1.csv")
+  write.csv(cvm_by_year_agegroup1, "~/../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cancer/cvm_by_year_agegroup1.csv")
 })
 
 # Exporting file grouped by year and age groups 0-59, 60-69, 70-79, 80+
 tryCatch({
-  write.csv(cvm_by_year_agegroup2, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup2.csv")
+  write.csv(cvm_by_year_agegroup2, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cvm_by_year_agegroup2.csv")
 }, error = function(e) {
-  write.csv(cvm_by_year_agegroup2, "~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup2.csv")
+  write.csv(cvm_by_year_agegroup2, "~/Downloads/Registro Central de Cancer/cvm_by_year_agegroup2.csv")
 }, error = function(e) {
-  write.csv(cvm_by_year_agegroup2, "~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cvm_by_year_agegroup2.csv")
+  write.csv(cvm_by_year_agegroup2, "~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cancer/cvm_by_year_agegroup2.csv")
 })
 
 ```
