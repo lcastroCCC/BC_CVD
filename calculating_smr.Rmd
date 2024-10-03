@@ -181,14 +181,14 @@ gen_2[, gen_cvd_rate := gen_cvd_rate / 1000]
 
 
 
-# Exporting cancer data for use in smr calculations
-cancer <- tryCatch({
+# Importing cancer data for use in smr calculations
+cancer <- suppressWarnings(tryCatch({
   read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_cleansed.csv")
 }, error = function(e) {
   read.csv("~/Downloads/Registro Central de Cancer/cancer_cleansed.csv")
 }, error = function(e) {
   read.csv("~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_cleansed.csv")
-})
+}))
 cancer <- cancer %>%
   mutate(FollowUpStart = as.Date(FollowUpStart),
          DiagnosisDate = as.Date(DiagnosisDate),

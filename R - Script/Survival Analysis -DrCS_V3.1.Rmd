@@ -47,7 +47,7 @@ library(RColorBrewer)}
 
 
 
-```{r echo=FALSE, message=FALSE, warning=FALSE}
+```{r wrangling, echo=FALSE, message=FALSE, warning=FALSE}
 
 # Data --------------------------------------------------------------------
 
@@ -92,13 +92,6 @@ data$PR <- factor(data$PR,
 data$HER2.cat <- factor(data$HER2.cat, 
                        levels = c('Positive','Negative',
                                   'Other','Unknown'))
-
-#Age Variable is character (set to numeric)
-data$AgeDx <- as.numeric(data$AgeDx)
-
-#Age Group Categories
-data$AgeCat <- cut(data$AgeDx, breaks = c(0,17,59, 888,999), include.lowest = TRUE,
-                   labels = c('0-17','18-59', '60+', 'Unknown'))
 
 #Set factor order for Stage at Diagnosis
 data$StageAtDx <- relevel(factor(data$StageAtDx), ref = "Localized")
@@ -230,9 +223,36 @@ data <- data %>%
 
 # time to follow up 
 data <- data %>%
-  mutate(time =yy_dlc-ydiag,
-         AgeFU = AgeDx + time)
+  mutate(mm_dx = as.numeric(ifelse(is.na(mm_dx), 6, mm_dx)),
+         mm_dlc = as.numeric(ifelse(is.na(mm_dlc), 6, mm_dlc)),
+         DiagnosisDate = make_date(year = ydiag, month = mm_dx, day = 1),
+         FollowUpStart = DiagnosisDate %m+% years(1),
+         FollowUpEnd = make_date(year = yy_dlc, month = mm_dlc, day = 1),
+         FollowUpYears = as.numeric(difftime(FollowUpEnd, FollowUpStart, units = "days")) / 365.25,
+         time = FollowUpYears,
+         AgeFU = AgeDx + time,
+         maritallabel = factor(str_to_title(maritallabel)),
+         AgeDx = ifelse(AgeDx == 999, NA, AgeDx),
+         AgeDxCat = as.factor(case_when(AgeDx >= 18 & AgeDx <= 59 ~ "18-59",
+                                            AgeDx >= 60 & AgeDx <= 69 ~ "60-69",
+                                            AgeDx >= 70 & AgeDx <= 79 ~ "70-79",
+                                            AgeDx >= 80 ~ "80+",
+                                            TRUE ~ NA)))
+data$yearDiagCat <- cut(data$ydiag, 
+                   breaks = c(2003, 2009, 2014, 2019), 
+                   labels = c("2004-2009", "2010-2014", "2015-2019"),
+                   right = TRUE)
+#datatest <- data %>% select(Vital, ydiag, mm_dx, FollowUpStart, FollowUpEnd, yy_dlc, mm_dlc, FollowUpYears, time) 
+# data <- data %>%
+#   filter(time > 0) # Person met follow-up criteria
+data <- data %>%
+  filter(time > 0) # Person met follow-up criteria
 
+# dataNO <- data %>%
+#   filter(time <= 0) # Person did not meet follow-up criteria
+# nrow(dataNO); nrow(data) # No follow-up period vs everyone
+# summary(dataNO$FollowUpYears)
+# table(dataNO$Vital)
 
 ```
 
@@ -268,20 +288,21 @@ Below is the overall proposed analysis strategy to meet the study objectives:
 # Descriptive Analysis ----------------------------------------------------
 
 data %>%
-  select(c(Vital, Procedure, StageAtDx, AgeCat, ER, PR, HER2.cat, CsumCat, `Myocardial Infarction`, `Congestive heart failure`, `Peripheral vascular disease`, `Cerebrovascular disease`, `Chronic pulmonary disease`, `Diabetes without chronic complication`, `Diabetes with chronic complication`, HealthRegion)) %>%
+  select(c(Vital, Procedure, StageAtDx, AgeDxCat, ER, PR, HER2.cat, CsumCat, `Myocardial Infarction`, `Congestive heart failure`, `Peripheral vascular disease`, `Cerebrovascular disease`, `Chronic pulmonary disease`, `Diabetes without chronic complication`, `Diabetes with chronic complication`, HealthRegion)) %>%
+  filter(Vital != "Alive", !is.na(AgeDxCat)) %>% 
  tbl_summary(by = Vital,
               label = c(Procedure ~ "Treatment",
                         StageAtDx ~ "Stage at Diagnosis",
-                        AgeCat ~ "Age at Diagnosis",
+                        AgeDxCat ~ "Age at Diagnosis",
                         ER ~ "ER Assay",
                         PR ~ "PR Assay",
                         HER2.cat ~ "HER2", 
                         CsumCat ~ "Comorbidities",
-                        HealthRegion ~ "Health Region"))  %>%
+                        HealthRegion ~ "Health Region")) %>%
  add_overall(col_label = "**All death causes**  \nN = {style_number(N)}") %>%
   modify_footnote(everything() ~ NA) %>%
   modify_caption("**Table 1: Baseline Characteristics of Study Population**") %>%
- modify_column_hide(columns = "stat_4") %>%
+ modify_column_hide(columns = "stat_3") %>%
   as_gt() %>%
  gt::tab_source_note("Note: Values are N (%), unless otherwise indicated.")
 
@@ -292,7 +313,7 @@ data %>%
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
 data %>%
-  filter(Vital != "Alive", AgeDx != 999, time >=0 ) %>% 
+  filter(Vital != "Alive", AgeDx != 999) %>% 
   select(c(Vital, AgeDx, AgeFU, time)) %>%
  tbl_summary(by = Vital,
               label = c(AgeDx ~ "Age at Diagnosis",
@@ -333,10 +354,8 @@ data %>%
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
 data %>%
-  filter(AgeDx != 999)%>%
-  ggplot(aes(x = AgeDx))+
-  geom_histogram()+
-  #facet_wrap(~StageAtDx,scales = 'free')+
+  ggplot(aes(x = AgeDxCat))+
+  geom_bar()+
   facet_wrap(~Vital, scales = 'free_y')+
   labs(x = 'Age at diagnosis', y = 'Frequency')+
   theme_bw()
@@ -488,13 +507,10 @@ data %>%
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 # Fit the Kaplan-Meier survival model
 
-allC <- data %>%
-  select(time,status1)
-
-km_fit <- survfit(Surv(time, status1)~1, allC)
+km_fit_gen <- survfit(coxph(Surv(time, status1) ~ 1 + AgeDxCat, data = data))
 
 km_plot <- ggsurvplot(
-  km_fit, 
+  km_fit_gen, 
   data = data,
   risk.table = TRUE,       # Add number at risk table
  # pval = TRUE,             # Show p-value of log-rank test (although not relevant here)
@@ -521,28 +537,72 @@ print(km_plot)
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
-# Related table
-allC <- tidy(km_fit)
+summary_km <- summary(km_fit_gen, times = c(3, 5, 10, 15)) 
+allCT <- data.frame(
+  time = summary_km$time,
+  surv_prob = summary_km$surv,
+  lower_ci = summary_km$lower,
+  upper_ci = summary_km$upper
+)
 
-allC  <- allC   %>%
-  filter(time %in% c(5,10,15)) %>%
-  mutate(value= paste0(100 * round(estimate,4), '(',100*round(conf.low,4), '-',100*round(conf.high,4), ')' )
-        # outcome = ifelse(outcome == '1','CVD Death',
-        #                  ifelse(outcome == '2', 'Other Cause Death',''))
-        )%>%
-  select(time, value)%>%
-  pivot_wider(values_from = value, names_from = time)%>%
-  rename(`5-year (95% CI)` = `5`,
+allCT <- allCT %>%
+  mutate(value = paste0(100 * round(surv_prob,4), '(',100*round(lower_ci,4), '-',100*round(upper_ci,4), ')' )) %>%
+  select(time, value) %>%
+  pivot_wider(values_from = value, names_from = time, values_fill = '0 (0-0)') %>%
+  rename(`3-year (95% CI)` = `3`,
+         `5-year (95% CI)` = `5`,
          `10-year (95% CI)` = `10`,
          `15-year (95% CI)` = `15`)
-  
-kable(allC,  format = "html", escape = FALSE, align = "c")%>%
+
+
+kable(allCT,  format = "html", escape = FALSE, align = "c")%>%
   kable_styling( full_width = FALSE) %>%
-  column_spec(1, bold = TRUE) %>%
   footnote(general = "Values are n (%), unless otherwise indicated. Crude number and rate estimates of mortality from the study data. All-cause mortality estimated by Kaplan-Meier methods",
            general_title = "", 
            footnote_as_chunk = TRUE)
 
+```
+
+*Figure 12: Overall and Specific Mortality Survival Curves*
+
+```{r overall_specific, echo = FALSE}
+# Overall survival curve
+km_fit_gen <- survfit(coxph(Surv(time, status1) ~ 1 + AgeDxCat, data = data))
+
+# Specific survival curve
+km_fit_spec <- survfit(coxph(Surv(time, status1) ~ 1 + strata(Vital) + AgeDxCat, 
+                             data = data %>% filter(!(Vital %in% c("Alive", "Other Death")))))
+
+# Extract data from survfit objects
+km_data_gen <- tidy(km_fit_gen)
+km_data_spec <- tidy(km_fit_spec)
+
+# Overlay the two survival curves, but include strata for the specific model
+ggplot() +
+  # General survival curve
+  geom_step(data = km_data_gen, aes(x = time, y = estimate, color = "Overall"), size = 1) + 
+  geom_ribbon(data = km_data_gen, aes(x = time, ymin = conf.low, ymax = conf.high), alpha = 0.2, fill = "grey") +  # Confidence interval for general survival
+  
+   # BC survival curve
+   geom_step(data = km_data_spec %>% filter(strata == "BC death"), aes(x = time, y = estimate, color = "BC death"), size = 1) +
+   geom_ribbon(data = km_data_spec %>% filter(strata == "BC death"), aes(x = time, ymin = conf.low, ymax = conf.high), alpha = 0.2, fill = "pink") +  # Confidence interval for BC Death
+   
+   # CVD survival curve 
+   geom_step(data = km_data_spec %>% filter(strata == "CVD death"), aes(x = time, y = estimate, color = "CVD death"), size = 1) +
+   geom_ribbon(data = km_data_spec %>% filter(strata == "CVD death"), aes(x = time, ymin = conf.low, ymax = conf.high), alpha = 0.2, fill = "red") +  # Confidence interval for CVD Death
+    
+  labs(title = "",
+       x = "Years", 
+       y = "Probability of Survival",
+       color = "Death Cause") +
+  scale_color_manual(values = c("Overall" = "grey", "BC death" = "pink", "CVD death" = "red")) +  # Set colors for lines
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    legend.position = "top"
+  )
 ```
 
 *Figure 12: CVD Specific Mortality Survival Curve* 
@@ -550,15 +610,14 @@ kable(allC,  format = "html", escape = FALSE, align = "c")%>%
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 # Fit the Kaplan-Meier survival model
 
-allC <- data %>%
-  filter(Vital == "CVD death") %>%
-  select(time,status1)
+allCVD <- data %>%
+  filter(Vital == "CVD death")
 
-km_fit <- survfit(Surv(time, status1)~1, allC)
+km_fit <- survfit(coxph(Surv(time, status1) ~ 1 + AgeDxCat, data = allCVD))
 
 km_plot <- ggsurvplot(
   km_fit, 
-  data = data,
+  data = allCVD,
   risk.table = TRUE,       # Add number at risk table
  # pval = TRUE,             # Show p-value of log-rank test (although not relevant here)
   conf.int = TRUE,         # Show confidence intervals
@@ -585,49 +644,56 @@ print(km_plot)
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
-# Related table
-allC <- tidy(km_fit)
+summary_km <- summary(km_fit, times = c(3, 5, 10, 15)) 
+allCT <- data.frame(
+  time = summary_km$time,
+  surv_prob = summary_km$surv,
+  lower_ci = summary_km$lower,
+  upper_ci = summary_km$upper
+)
 
-allC  <- allC   %>%
-  filter(time %in% c(5,10,15)) %>%
-  mutate(value= paste0(100 * round(estimate,4), '(',100*round(conf.low,4), '-',100*round(conf.high,4), ')'))%>%
-  select(time, value)%>%
-  pivot_wider(values_from = value, names_from = time)%>%
-  rename(`5-year (95% CI)` = `5`,
+allCT <- allCT %>%
+  mutate(value = paste0(100 * round(surv_prob,4), '(',100*round(lower_ci,4), '-',100*round(upper_ci,4), ')' )) %>%
+  select(time, value) %>%
+  pivot_wider(values_from = value, names_from = time, values_fill = '0 (0-0)')%>%
+  rename(`3-year (95% CI)` = `3`,
+         `5-year (95% CI)` = `5`,
          `10-year (95% CI)` = `10`,
          `15-year (95% CI)` = `15`)
-  
-kable(allC,  format = "html", escape = FALSE, align = "c")%>%
+
+kable(allCT,  format = "html", escape = FALSE, align = "c")%>%
   kable_styling( full_width = FALSE) %>%
-  column_spec(1, bold = TRUE) %>%
   footnote(general = "Values are n (%), unless otherwise indicated. Crude number and rate estimates of mortality from the study data. All-cause mortality estimated by Kaplan-Meier methods",
            general_title = "", 
            footnote_as_chunk = TRUE)
 
 ```
 
-*Figure 13: Overall Mortality Survival Curve by Treatment* 
+*Figure 13: CVD Specific Mortality Survival Curve by Treatment* 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 # Fit the Kaplan-Meier survival model
 
-km_fit2 <- survfit(Surv(time, status1)~Procedure, data = data %>% 
-                          filter(!Procedure %in% c("Unknown", "No treatment")))
+# km_fit2 <- survfit(Surv(time, status1)~Procedure, data = data %>% 
+#                           filter(!Procedure %in% c("Unknown", "No treatment")))
 
-filtered_levels <- levels(droplevels(data$Procedure[!data$Procedure %in% c("Unknown", "No treatment")]))
+km_fit2 <- survfit(coxph(Surv(time, status1) ~ strata(Procedure) + AgeDxCat, 
+                         data = allCVD %>% filter(!Procedure %in% c("Unknown", "No treatment"))))
+
+filtered_levels <- levels(droplevels(allCVD$Procedure[!allCVD$Procedure %in% c("Unknown", "No treatment")]))
 
 km_plot2 <- ggsurvplot(
     km_fit2, 
-    data = data %>% filter(!Procedure %in% c("Unknown", "No treatment")),  # Filtered data
+    data = allCVD %>% filter(!Procedure %in% c("Unknown", "No treatment")),  # Filtered data
     risk.table = FALSE,       # Add number at risk table
-    pval = TRUE,              # Show p-value of log-rank test
-    # conf.int = TRUE,        # Show confidence intervals
+    #conf.int = TRUE,        # Show confidence intervals
     xlab = "Years",           # X-axis label
     ylab = "Probability of Survival",  # Y-axis label
     legend.title = "Procedure",        # Legend title
     legend.labs = filtered_levels,     # Use filtered levels for legend labels
     palette = c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#C695DD", "#E25869"), # Custom color palette
-    ggtheme = theme_minimal())
+    ggtheme = theme_minimal(),
+    lwd = 0.5)
 
 km_plot2$plot <- km_plot2$plot +
   theme(
@@ -638,64 +704,73 @@ km_plot2$plot <- km_plot2$plot +
     legend.text = element_text(size = 8)
   ) +
   labs(title = "Survival Curve by Treatment") +
-  guides(color = guide_legend(ncol = 2)) 
+  guides(color = guide_legend(ncol = 3)) 
 
 # Print the plot
 print(km_plot2)
 
 ```
 
-*Table 5: All Cause Mortality Survival Confidence Intervals Table by Treatment* 
+*Table 5: CVD Specific Mortality Survival Confidence Intervals Table by Treatment* 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
 
-allCT <- tidy(km_fit2)
-allCT[is.na(allCT)] <- 0
+summary_km <- summary(km_fit2, times = c(3, 5, 10, 15)) 
+allCT <- data.frame(
+  time = summary_km$time,
+  strata = summary_km$strata,
+  surv_prob = summary_km$surv,
+  lower_ci = summary_km$lower,
+  upper_ci = summary_km$upper
+)
 
-allCT  <- allCT   %>%
-  filter(time %in% c(1,5,10,15)) %>%
-  mutate(value= paste0(100 * round(estimate,4), '(',100*round(conf.low,4), '-',100*round(conf.high,4), ')' ),
-        strata = gsub('Procedure=','',strata))%>%
-  select(time, strata,value)%>%
+allCT <- allCT %>%
+  mutate(value = paste0(100 * round(surv_prob,4), '(',100*round(lower_ci,4), '-',100*round(upper_ci,4), ')' ),
+        strata = gsub('Procedure=','',strata)) %>%
+  select(time, strata,value) %>%
   pivot_wider(values_from = value, names_from = time, values_fill = '0 (0-0)')%>%
-  rename(`1-year (95% CI)` = `1`,
+  rename(`3-year (95% CI)` = `3`,
          `5-year (95% CI)` = `5`,
          `10-year (95% CI)` = `10`,
          `15-year (95% CI)` = `15`,
          Treatment = strata)
-  
+
+
 kable(allCT,  format = "html", escape = FALSE, align = "c")%>%
   kable_styling( full_width = FALSE) %>%
-  column_spec(1, bold = TRUE) %>%
-  footnote(general = "Values are n (%), unless otherwise indicated. Crude number and rate estimates of mortality from the study data. All-cause mortality estimated by Kaplan-Meier methods",
+  footnote(general = "Values are n (%), unless otherwise indicated. Crude number and rate estimates of mortality from the study data. CVD specific mortality estimated by Kaplan-Meier methods. Treatment Chemotherapy + Radiotherapy did not meet table survival time thresholds.",
            general_title = "", 
            footnote_as_chunk = TRUE)
 
 rm(allC);rm(allCT);rm(km_fit);rm(km_fit2);rm(km_plot);rm(km_plot2)
 ```
 
-*Figure 14: All Cause Mortality Survival Curve by Surgery Treatment* 
+*Figure 14: CVD Specific Mortality Survival Curve by Surgery Treatment* 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 # Fit the Kaplan-Meier survival model
-surgery_data <- data %>%
+surgery_data <- allCVD %>%
   filter(grepl("Surgery", Procedure))
 surgery_data$Procedure <- factor(surgery_data$Procedure)
 
-km_fit2 <- survfit(Surv(time, status1)~Procedure, data = surgery_data)
+km_fit2 <- survfit(coxph(Surv(time, status1) ~ strata(Procedure) + AgeDxCat, 
+                         data = surgery_data))
+# km_fit2 <- survfit(Surv(time, status1)~Procedure, data = surgery_data)
 
 km_plot2 <- ggsurvplot(
   km_fit2, 
   data = surgery_data,
   risk.table = FALSE,       # Add number at risk table
-  pval = TRUE,             # Show p-value of log-rank test (although not relevant here)
+  #pval = TRUE, 
+  pval.size = 3,
  # conf.int = TRUE,         # Show confidence intervals
   xlab = "Years",          # X-axis label
   ylab = "Probability of Survival", # Y-axis label
    legend.title = "Procedure",  # Legend title
     legend.labs = levels(surgery_data$Procedure),
   palette = c("#E69F00", "#56B4E9", "#009E73",  "#0072B2"), # Custom color palette
-  ggtheme = theme_minimal() 
+  ggtheme = theme_minimal(),
+  lwd = 0.5
   ) 
 
 km_plot2$plot <- km_plot2$plot +
@@ -714,27 +789,249 @@ print(km_plot2)
 
 ```
 
-*Table 6: All Cause Mortality Survival Confidence Intervals Table by Surgery Treatment* 
+*Table 6: CVD Specific Mortality Survival Confidence Intervals Table by Surgery Treatment* 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
 
-allCT <- tidy(km_fit2)
-allCT[is.na(allCT)] <- 0
+summary_km <- summary(km_fit2, times = c(3, 5, 10, 15)) 
+allCT <- data.frame(
+  time = summary_km$time,
+  strata = summary_km$strata,
+  surv_prob = summary_km$surv,
+  lower_ci = summary_km$lower,
+  upper_ci = summary_km$upper
+)
 
-allCT  <- allCT   %>%
-  filter(time %in% c(5,10,15)) %>%
-  mutate(value= paste0(100 * round(estimate,4), '(',100*round(conf.low,4), '-',100*round(conf.high,4), ')' ),
-        strata = gsub('Procedure=','',strata))%>%
-  select(time, strata,value)%>%
-  pivot_wider(values_from = value, names_from = time, values_fill = '0')%>%
-  rename(`5-year (95% CI)` = `5`,
+allCT <- allCT %>%
+  mutate(value = paste0(100 * round(surv_prob,4), '(',100*round(lower_ci,4), '-',100*round(upper_ci,4), ')' ),
+        strata = gsub('Procedure=','',strata)) %>%
+  select(time, strata,value) %>%
+  pivot_wider(values_from = value, names_from = time, values_fill = '0 (0-0)')%>%
+  rename(`3-year (95% CI)` = `3`,
+         `5-year (95% CI)` = `5`,
          `10-year (95% CI)` = `10`,
          `15-year (95% CI)` = `15`,
          Treatment = strata)
+
+kable(allCT,  format = "html", escape = FALSE, align = "c")%>%
+  kable_styling( full_width = FALSE) %>%
+  footnote(general = "Values are n (%), unless otherwise indicated. Crude number and rate estimates of mortality from the study data. All-cause mortality estimated by Kaplan-Meier methods",
+           general_title = "", 
+           footnote_as_chunk = TRUE)
+
+rm(allC);rm(allCT);rm(km_fit);rm(km_fit2);rm(km_plot);rm(km_plot2)
+```
+
+
+*Figure 15: CVD Specific Mortality Survival Curve by Marital Status* 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# Fit the Kaplan-Meier survival model
+km_fit2 <- survfit(coxph(Surv(time, status1) ~ strata(maritallabel) + AgeDxCat, 
+                         data = allCVD %>% 
+                          filter(!maritallabel %in% c("Unknown"))))
+# km_fit2 <- survfit(Surv(time, status1)~maritallabel, data = data %>% 
+#                           filter(!maritallabel %in% c("Unknown")))
+
+filtered_levels <- levels(droplevels(allCVD$maritallabel[!allCVD$maritallabel %in% c("Unknown")]))
+
+km_plot2 <- ggsurvplot(
+    km_fit2, 
+    data = allCVD %>% filter(!maritallabel %in% c("Unknown")),  # Filtered data
+    risk.table = FALSE,       # Add number at risk table
+    # pval = TRUE,              # Show p-value of log-rank test
+    # conf.int = TRUE,        # Show confidence intervals
+    xlab = "Years",           # X-axis label
+    ylab = "Probability of Survival",  # Y-axis label
+    legend.title = "Marital Status",        # Legend title
+    legend.labs = filtered_levels,     # Use filtered levels for legend labels
+    palette = c("#009E73", "#F0E442"), # Custom color palette
+    ggtheme = theme_minimal())
+
+km_plot2$plot <- km_plot2$plot +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 8)
+  ) +
+  labs(title = "Survival Curve by Marital Status") +
+  guides(color = guide_legend(ncol = 2)) 
+
+# Print the plot
+print(km_plot2)
+
+```
+
+*Table 7: CVD Specific Mortality Survival Confidence Intervals Table by Marital Status* 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+summary_km <- summary(km_fit2, times = c(3, 5, 10, 15)) 
+allCT <- data.frame(
+  time = summary_km$time,
+  strata = summary_km$strata,
+  surv_prob = summary_km$surv,
+  lower_ci = summary_km$lower,
+  upper_ci = summary_km$upper
+)
+
+allCT <- allCT %>%
+  mutate(value = paste0(100 * round(surv_prob,4), '(',100*round(lower_ci,4), '-',100*round(upper_ci,4), ')' ),
+        strata = gsub('Procedure=','',strata)) %>%
+  select(time, strata,value) %>%
+  pivot_wider(values_from = value, names_from = time, values_fill = '0 (0-0)')%>%
+  rename(`3-year (95% CI)` = `3`,
+         `5-year (95% CI)` = `5`,
+         `10-year (95% CI)` = `10`,
+         `15-year (95% CI)` = `15`,
+         `Marital Status` = strata)
   
 kable(allCT,  format = "html", escape = FALSE, align = "c")%>%
   kable_styling( full_width = FALSE) %>%
-  column_spec(1, bold = TRUE) %>%
+  footnote(general = "Values are n (%), unless otherwise indicated. Crude number and rate estimates of mortality from the study data. All-cause mortality estimated by Kaplan-Meier methods",
+           general_title = "", 
+           footnote_as_chunk = TRUE)
+
+rm(allC);rm(allCT);rm(km_fit);rm(km_fit2);rm(km_plot);rm(km_plot2)
+```
+
+*Figure 16: CVD Specific Mortality Survival Curve by Year of Diagnosis* 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# Fit the Kaplan-Meier survival model
+
+#km_fit2 <- survfit(Surv(time, status1)~yearDiagCat, data = data)
+km_fit2 <- survfit(coxph(Surv(time, status1) ~ strata(yearDiagCat) + AgeDxCat, 
+                         data = allCVD))
+
+km_plot2 <- ggsurvplot(
+    km_fit2, 
+    data = allCVD,  # Filtered data
+    risk.table = FALSE,       # Add number at risk table
+    #pval = TRUE,              # Show p-value of log-rank test
+    # conf.int = TRUE,        # Show confidence intervals
+    xlab = "Years",           # X-axis label
+    ylab = "Probability of Survival",  # Y-axis label
+    legend.title = "Year of Diagnosis",        # Legend title
+    legend_labels = levels(data$yearDiagCat),
+#    palette = c("#009E73", "#F0E442"), # Custom color palette
+    ggtheme = theme_minimal())
+
+km_plot2$plot <- km_plot2$plot +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 8)
+  ) +
+  labs(title = "Survival Curve by Year of Diagnosis") +
+  guides(color = guide_legend(ncol = 2)) 
+
+# Print the plot
+print(km_plot2)
+
+```
+
+*Table 8: CVD Specific Mortality Survival Confidence Intervals Table by Year of Diagnosis* 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+summary_km <- summary(km_fit2, times = c(3, 5, 10, 15)) 
+allCT <- data.frame(
+  time = summary_km$time,
+  strata = summary_km$strata,
+  surv_prob = summary_km$surv,
+  lower_ci = summary_km$lower,
+  upper_ci = summary_km$upper
+)
+
+allCT <- allCT %>%
+  mutate(value = paste0(100 * round(surv_prob,4), '(',100*round(lower_ci,4), '-',100*round(upper_ci,4), ')' ),
+        strata = gsub('Procedure=','',strata)) %>%
+  select(time, strata,value) %>%
+  pivot_wider(values_from = value, names_from = time, values_fill = '0 (0-0)')%>%
+  rename(`3-year (95% CI)` = `3`,
+         `5-year (95% CI)` = `5`,
+         `10-year (95% CI)` = `10`,
+         `15-year (95% CI)` = `15`,
+         `Year of Diagnosis` = strata)
+  
+kable(allCT,  format = "html", escape = FALSE, align = "c")%>%
+  kable_styling( full_width = FALSE) %>%
+  footnote(general = "Values are n (%), unless otherwise indicated. Crude number and rate estimates of mortality from the study data. All-cause mortality estimated by Kaplan-Meier methods",
+           general_title = "", 
+           footnote_as_chunk = TRUE)
+
+rm(allC);rm(allCT);rm(km_fit);rm(km_fit2);rm(km_plot);rm(km_plot2)
+```
+
+*Figure 17: CVD Specific Mortality Survival Curve by Comorbidity* 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+data.Comorb <- allCVD %>%
+  filter(ydiag >= 2010)
+km_fit2 <- survfit(coxph(Surv(time, status1) ~ strata(Comorb.cat) + AgeDxCat, 
+                         data = data.Comorb %>% filter(!Comorb.cat %in% c("Unknown"))))
+
+filtered_levels <- levels(droplevels(data.Comorb$Comorb.cat[!data.Comorb$Comorb.cat %in% c("Unknown")]))
+
+km_plot2 <- ggsurvplot(
+    km_fit2, 
+    data = data.Comorb %>% filter(!Procedure %in% c("Unknown")),  # Filtered data
+    risk.table = FALSE,       # Add number at risk table
+    #conf.int = TRUE,        # Show confidence intervals
+    xlab = "Years",           # X-axis label
+    ylab = "Probability of Survival",  # Y-axis label
+    legend.title = "Comorbidity",        # Legend title
+    legend.labs = filtered_levels,     # Use filtered levels for legend labels
+    palette = c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#C695DD", "#E25869"), # Custom color palette
+    ggtheme = theme_minimal(),
+    lwd = 0.5)
+
+km_plot2$plot <- km_plot2$plot +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 8)
+  ) +
+  labs(title = "Survival Curve by Comorbidity") +
+  guides(color = guide_legend(ncol = 2)) 
+
+# Print the plot
+print(km_plot2)
+
+```
+
+*Table 9: CVD Specific Mortality Survival Confidence Intervals Table by Comorbidity* 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+summary_km <- summary(km_fit2, times = c(3, 5, 10, 15)) 
+allCT <- data.frame(
+  time = summary_km$time,
+  strata = summary_km$strata,
+  surv_prob = summary_km$surv,
+  lower_ci = summary_km$lower,
+  upper_ci = summary_km$upper
+)
+
+allCT <- allCT %>%
+  mutate(value = paste0(100 * round(surv_prob,4), '(',100*round(lower_ci,4), '-',100*round(upper_ci,4), ')' ),
+        strata = gsub('Procedure=','',strata)) %>%
+  select(time, strata,value) %>%
+  pivot_wider(values_from = value, names_from = time, values_fill = '0 (0-0)')%>%
+  rename(`3-year (95% CI)` = `3`,
+         `5-year (95% CI)` = `5`,
+         `10-year (95% CI)` = `10`,
+         Comorbidity = strata)
+  
+kable(allCT,  format = "html", escape = FALSE, align = "c")%>%
+  kable_styling( full_width = FALSE) %>%
   footnote(general = "Values are n (%), unless otherwise indicated. Crude number and rate estimates of mortality from the study data. All-cause mortality estimated by Kaplan-Meier methods",
            general_title = "", 
            footnote_as_chunk = TRUE)
@@ -792,6 +1089,13 @@ tidycmprsk::cuminc(Surv(time, status2) ~ 1, data) %>%
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
 way2 <- tidy(tidycmprsk::cuminc(Surv(time, status2) ~ 1, data)) %>%
+  filter(
+    (time >= 4.6 & time < 5.5) |
+      (time >= 9.6 & time < 10.5) |
+      (time >= 14.6 & time < 15.5)
+  ) %>%
+  group_by(time = round(time), outcome) %>%  
+  slice(1) %>%
   filter(time %in% c(5,10,15)) %>%
   mutate(value= paste0(100 * round(estimate,4), '(',100*round(conf.low,4), '-',100*round(conf.high,4), ')' ),
          outcome = ifelse(outcome == '1','CVD Death',
@@ -805,7 +1109,6 @@ way2 <- tidy(tidycmprsk::cuminc(Surv(time, status2) ~ 1, data)) %>%
   
 kable(way2,  format = "html", escape = FALSE, align = "c")%>%
   kable_styling( full_width = FALSE) %>%
-  column_spec(1, bold = TRUE) %>%
   footnote(general = "Values are n (%), unless otherwise indicated. CVD and BC mortality are estimated by Fine and Gray’s competing risk method.",
            general_title = "Note: ", 
            footnote_as_chunk = TRUE)
@@ -842,6 +1145,13 @@ tidycmprsk::cuminc(Surv(time, statusV)~1, data) %>%
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
 way3 <- tidy(tidycmprsk::cuminc(Surv(time, statusV)~1, data)) %>%
+   filter(
+    (time >= 4.6 & time < 5.5) |
+      (time >= 9.6 & time < 10.5) |
+      (time >= 14.6 & time < 15.5)
+  ) %>%
+  group_by(time = round(time), outcome) %>%  
+  slice(1) %>%
   filter(time %in% c(5,10,15)) %>%
   mutate(value= paste0(100 * round(estimate,4), '(',100*round(conf.low,4), '-',100*round(conf.high,4), ')' ),
          outcome = ifelse(outcome == '1','CVD Death',
@@ -855,7 +1165,6 @@ way3 <- tidy(tidycmprsk::cuminc(Surv(time, statusV)~1, data)) %>%
   
 kable(way3,  format = "html", escape = FALSE, align = "c")%>%
   kable_styling( full_width = FALSE) %>%
-  column_spec(1, bold = TRUE) %>%
   footnote(general = "Values are n (%), unless otherwise indicated. CVD, BC mortality and Other Cause mortality are estimated by Fine and Gray’s competing risk method.",
            general_title = "Note: ", 
            footnote_as_chunk = TRUE)
@@ -890,8 +1199,8 @@ tidycmprsk::cuminc(Surv(time, status2) ~ Procedure, data) %>%
 
 # CIF for CVD by Age Category 
 
-tidycmprsk::cuminc(Surv(time, status2) ~ AgeCat, data) %>% 
-  ggcuminc(outcome = c( "1"), aes(color = AgeCat), size = 1)+
+tidycmprsk::cuminc(Surv(time, status2) ~ AgeDxCat, data) %>% 
+  ggcuminc(outcome = c( "1"), aes(color = AgeDxCat), size = 1)+
  #add_confidence_interval() +
  #add_risktable() +
   ylim(c(0, .1)) + 
