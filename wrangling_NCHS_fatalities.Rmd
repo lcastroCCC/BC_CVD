@@ -241,7 +241,7 @@ cvd_rates_gen2 <- left_join(clean_n_cvd_deaths_gen2, census2, by = c("current_da
 # Exporting general population rates by age groups 0-59 and 60+
 
 tryCatch({
-  write.csv(cvd_rates_gen1, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones", "cvm_rate_gen_pop1.csv")
+  write.csv(cvd_rates_gen1, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/cvm_rate_gen_pop1.csv")
 }, error = function(e) {
   write.csv(cvd_rates_gen1, "~/Downloads/NCHS/cvm_rate_gen_pop1.csv")
 })
@@ -249,7 +249,7 @@ tryCatch({
 # Exporting general population rates by age groups 0-59, 60-69, 70-79, 80+
 
 tryCatch({
-  write.csv(cvd_rates_gen2, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones", "cvm_rate_gen_pop2.csv")
+  write.csv(cvd_rates_gen2, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/cvm_rate_gen_pop2.csv")
 }, error = function(e) {
   write.csv(cvd_rates_gen2, "~/Downloads/NCHS/cvm_rate_gen_pop2.csv")
 })

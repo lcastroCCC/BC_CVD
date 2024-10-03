@@ -157,7 +157,7 @@ p_value = ifelse(p_value == 0,
 
 ```
 
-```{r smr_practice}
+```{r smr_with_function_prep}
 
 library(popEpi)
 library(Epi)
@@ -172,54 +172,151 @@ gen_2 <- suppressWarnings(tryCatch({
 }))
 gen_2 <- as.data.table(gen_2)
 setnames(gen_2, old = c("current_data_year", "AgeDeathCat2"), new = c("year", "agegroup"))
-gen_2[, fot := 1] 
-gen_2 <- gen_2[, .(fot, agegroup, year, n, Population, gen_cvd_rate)]
+gen_2 <- gen_2[, .(agegroup, year, n, Population, gen_cvd_rate)]
 gen_2[, agegroup := ifelse(agegroup == "80+", "80", 
                                 sub("([0-9]+)-([0-9]+)", "\\1", agegroup))]
 gen_2[, agegroup := as.numeric(agegroup)]
 gen_2[, gen_cvd_rate := gen_cvd_rate / 1000]
 
 
-# Cancer Registry
 
-paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_registry_20240924.csv",
-           "~/Downloads/Registro Central de Cancer/cancer_registry_20240924.csv",
-           paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_registry_20240924.csv"))
 
-cancer <- suppressWarnings(tryCatch({
-  read.csv(paths[1])
+# Exporting cancer data for use in smr calculations
+cancer <- tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_cleansed.csv")
 }, error = function(e) {
-  read.csv(paths[2])
+  read.csv("~/Downloads/Registro Central de Cancer/cancer_cleansed.csv")
 }, error = function(e) {
-  read.csv(paths[3])
-}))
-cancer <- cancer %>% 
-  mutate(status = ifelse(VitalStatus == 0 & cancer$CVDDeathCause == "CVD death", 1, 0),
-         FollowUpStart = ydiag + 1,
-         FollowUpYears = yy_dlc - FollowUpStart,
-         birth_date = ydiag - AgeDx,
-         )
-cancer$status <- ifelse(cancer$VitalStatus == 0 & cancer$CVDDeathCause == 'CVD death',1, 0)
-cancer$birth_date <- cancer$ydiag - cancer$AgeDx
-# Assuming ydiag is the year and mm_dx is the month
-cancer$date_diag <- as.Date(paste(cancer$ydiag, cancer$mm_dx, "01", sep = "-"), format = "%Y-%m-%d")
+  read.csv("~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_cleansed.csv")
+})
+cancer <- cancer %>%
+  mutate(FollowUpStart = as.Date(FollowUpStart),
+         DiagnosisDate = as.Date(DiagnosisDate),
+         FollowUpEnd = as.Date(FollowUpEnd),
+         FollowUpEnd = if_else(month(FollowUpEnd) == 1 & day(FollowUpEnd) == 1,
+                        FollowUpEnd + days(1),  # If the date is January 1, add one day
+                        FollowUpEnd),
+         maritallabel = ifelse(maritallabel == "unknown",
+                               NA,
+                               maritallabel))
+cancer_observed <- cancer %>%
+  filter(FollowUpYears > 0)
+```
 
-c <- lexpand(cancer, status = status, 
-             birth = birth_date, 
-             exit = yy_dlc, 
-             entry = ydiag,
-              breaks = list(per = 2004:2030, age = c(18, 60, 70, 80, Inf), fot = c(0:Inf)), 
-              aggre = list(fot, agegroup = age, year = per))
+```{r smr_with_follow_up}
+
+# This function splits case-level observations by calendar time (per), age, and follow-up time
+c <- lexpand(cancer_observed, status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = FollowUpStart, # Without those that did not meet follow-up
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
+             aggre = list(agegroup = age, year = per))
+
+# Showing years, adjusted by year of death and age group
+smr_year <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('year', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print ='year'); smr_year
+
+#Showing age groups, adjusted by year of death and age group
+smr_agegroup <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('year', 'agegroup'), 
+                  test.type = "homogeneity", # test for equal SMRs
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print ='agegroup'); smr_agegroup # print selects which var to visualise
 
 
+# This function splits case-level observations by calendar time (per), age, and follow-up time
+c2 <- lexpand(cancer_observed[ !is.na(cancer_observed$maritallabel), ], status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = FollowUpStart, # Without those that did not meet follow-up
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
+             aggre = list(agegroup = age, year = per, maritallabel))
 
-smr_result <- sir(coh.data = c, coh.obs = 'from0to1', 
-                  coh.pyrs = 'pyrs', ref.data = gen_2, 
-                  ref.rate = 'gen_cvd_rate', adjust = c('agegroup', 'year'), print ='year'); smr_result
+# Showing years, adjusted by year of death and age group
+smr_marital <- sir(coh.data = c2, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('year', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print ='maritallabel'); smr_marital
 
-smr_result <- sir(coh.data = c, coh.obs = 'from0to1', 
-                  coh.pyrs = 'pyrs', ref.data = gen_2, 
-                  ref.rate = 'gen_cvd_rate', adjust = c('agegroup', 'year'), print ='agegroup'); smr_result
+```
+
+```{r smr_from_start}
+
+# This function splits case-level observations by calendar time (per), age, and follow-up time
+c <- lexpand(cancer, status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = DiagnosisDate, # From diagnosis
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
+             aggre = list(agegroup = age, year = per))
+
+# Showing years, adjusted by year of death and age group
+smr_year <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('year', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print ='year'); smr_year
+
+#Showing age groups, adjusted by year of death and age group
+smr_agegroup <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('year', 'agegroup'), 
+                  test.type = "homogeneity", # test for equal SMRs
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print ='agegroup'); smr_agegroup # print selects which var to visualise
+
+
+# This function splits case-level observations by calendar time (per), age, and follow-up time
+c2 <- lexpand(cancer[ !is.na(cancer$maritallabel), ], status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = DiagnosisDate, # From diagnosis
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
+             aggre = list(agegroup = age, year = per, maritallabel))
+
+# Showing years, adjusted by year of death and age group
+smr_marital <- sir(coh.data = c2, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('year', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print ='maritallabel'); smr_marital
+
+# Bar plot for marital status SMRs
+
+ggplot(smr_marital, aes(x = maritallabel, y = sir)) + 
+  geom_bar(stat = "identity", fill = "skyblue") +
+  geom_errorbar(aes(ymin = sir.lo, ymax = sir.hi), width = 0.2) +
+  labs(title = "Summary Measure of Marital Status", x = "Group", y = "Rate") +
+  theme_minimal()
+
 ```
 
 ```{r age_year_regression, include = FALSE}

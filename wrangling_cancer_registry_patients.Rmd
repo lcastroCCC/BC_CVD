@@ -18,8 +18,8 @@ library(tidyverse)
 
 ```{r data_wrangling,  cache = TRUE}
 # Paths
-paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cancer_registry_20240924.csv",
-           "~/Downloads/Registro Central de Cáncer/cancer_registry_20240924.csv",
+paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_registry_20240924.csv",
+           "~/Downloads/Registro Central de Cancer/cancer_registry_20240924.csv",
            paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_registry_20240924.csv"))
 
 # Attempt to read the file
@@ -34,6 +34,7 @@ cancer.raw <- suppressWarnings(tryCatch({
 cancer <- cancer.raw %>% 
   mutate(AgeDx = as.numeric(cancer.raw$AgeDx),
          AgeDx = ifelse(AgeDx == 999, NA, AgeDx),
+         birth_date = ydiag - AgeDx,
          AgeFollowUpStart = AgeDx + 1,   
          AgeDeath = ifelse(VitalStatus == 0,
                            AgeDx + (yy_dlc - ydiag), NA),
@@ -49,6 +50,7 @@ cancer <- cancer.raw %>%
                                             AgeDeath >= 70 & AgeDeath <= 79 ~ "70-79",
                                             AgeDeath >= 80 ~ "80+",
                                             TRUE ~ NA)),
+         cvdStatus = ifelse(VitalStatus == 0 & CVDDeathCause == "CVD death", 1, 0),
          Vital = as.factor(ifelse(VitalStatus == 0 & CVDDeathCause == 'CVD death','CVD death',
                                   ifelse(VitalStatus == 0 & BCDeathCause == 'BC death', 'BC death',
                                          ifelse(VitalStatus == 0, 'Other Death', 'Alive'
@@ -56,10 +58,10 @@ cancer <- cancer.raw %>%
          SurvivalTime = ifelse(VitalStatus == 1, NA,
                                ifelse(VitalStatus == 0 & FollowUpYears > 0,
                                       FollowUpYears, 0))) %>%
-  select(EncryptedID, 
-         mm_dx, ydiag, DiagnosisDate, FollowUpStart, AgeDx, AgeFollowUpStart, 
-         mm_dlc, yy_dlc, FollowUpEnd, FollowUpYears, AgeDeath, FollowUpYears,
-         AgeDeathCat, AgeDeathCat2, Vital, SurvivalTime, Surgery, Radiotherapy, Chemotherapy)
+   select(EncryptedID, 
+          mm_dx, ydiag, DiagnosisDate, FollowUpStart, AgeDx, birth_date, AgeFollowUpStart, 
+          mm_dlc, yy_dlc, FollowUpEnd, FollowUpYears, AgeDeath, FollowUpYears,
+          AgeDeathCat, AgeDeathCat2, Vital, cvdStatus, SurvivalTime, maritallabel, Surgery, Radiotherapy, Chemotherapy)
 
 # Reviewing exclusions | 65
 exclusions <- cancer %>%   
@@ -70,6 +72,7 @@ exclusions <- cancer %>%
 # Persons observed | 17,183
 cancer_observed <- cancer %>%
   filter(FollowUpYears > 0) 
+
 ```
 
 ```{r person-years_by_years}
@@ -317,20 +320,28 @@ cvm_by_year_agegroup2 <- cancer_observed %>%
 # Exporting file grouped by year and age groups 0-59 and 60+
 
 tryCatch({
-  write.csv(cvm_by_year_agegroup1, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup1.csv")
+  write.csv(cvm_by_year_agegroup1, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cvm_by_year_agegroup1.csv")
 }, error = function(e) {
-  write.csv(cvm_by_year_agegroup1, "~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup1.csv")
+  write.csv(cvm_by_year_agegroup1, "~/Downloads/Registro Central de Cancer/cvm_by_year_agegroup1.csv")
 }, error = function(e) {
   write.csv(cvm_by_year_agegroup1, "~/../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cvm_by_year_agegroup1.csv")
 })
 
 # Exporting file grouped by year and age groups 0-59, 60-69, 70-79, 80+
 tryCatch({
-  write.csv(cvm_by_year_agegroup2, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup2.csv")
+  write.csv(cvm_by_year_agegroup2, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cvm_by_year_agegroup2.csv")
 }, error = function(e) {
-  write.csv(cvm_by_year_agegroup2, "~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup2.csv")
+  write.csv(cvm_by_year_agegroup2, "~/Downloads/Registro Central de Cancer/cvm_by_year_agegroup2.csv")
 }, error = function(e) {
   write.csv(cvm_by_year_agegroup2, "~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cvm_by_year_agegroup2.csv")
 })
 
+# Exporting cancer data for use in smr calculations
+tryCatch({
+  write.csv(cancer, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_cleansed.csv")
+}, error = function(e) {
+  write.csv(cancer, "~/Downloads/Registro Central de Cancer/cancer_cleansed.csv")
+}, error = function(e) {
+  write.csv(cancer, "~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_cleansed.csv")
+})
 ```

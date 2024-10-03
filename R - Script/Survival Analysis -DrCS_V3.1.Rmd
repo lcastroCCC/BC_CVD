@@ -52,20 +52,19 @@ library(RColorBrewer)}
 # Data --------------------------------------------------------------------
 
 # Paths
-paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/datosCarola_invasive_seq0&1_NoID.xlsx",
-           "~/Downloads/Registro Central de Cáncer/datosCarola_invasive_seq0&1_NoID.xlsx",
-           paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/datosCarola_invasive_seq0&1_NoID.xlsx"))
+paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_registry_20240924.csv",
+           "~/Downloads/Registro Central de Cancer/cancer_registry_20240924.csv",
+           paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_registry_20240924.csv"))
 
 # Loading dataframe
 
 data <- suppressWarnings(tryCatch({
-  read_excel(paths[1])
+  read.csv(paths[1], fileEncoding = "UTF-8")
 }, error = function(e) {
-  read_excel(paths[2])
+  read.csv(paths[2], fileEncoding = "UTF-8")
 }, error = function(e) {
-  read_excel(paths[3])
+  read.csv(paths[3], fileEncoding = "UTF-8")
 }))
-
 
 # ER Assay, PR Assay & HER2 
 # Reference links for encoding in data dictionary document
@@ -612,22 +611,23 @@ kable(allC,  format = "html", escape = FALSE, align = "c")%>%
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 # Fit the Kaplan-Meier survival model
 
-km_fit2 <- survfit(Surv(time, status1)~Procedure, data = data)
+km_fit2 <- survfit(Surv(time, status1)~Procedure, data = data %>% 
+                          filter(!Procedure %in% c("Unknown", "No treatment")))
+
+filtered_levels <- levels(droplevels(data$Procedure[!data$Procedure %in% c("Unknown", "No treatment")]))
 
 km_plot2 <- ggsurvplot(
-  km_fit2, 
-  data = data,
-  risk.table = FALSE,       # Add number at risk table
-  pval = TRUE,             # Show p-value of log-rank test (although not relevant here)
- # conf.int = TRUE,         # Show confidence intervals
-  xlab = "Years",          # X-axis label
-  ylab = "Probability of Survival", # Y-axis label
-   legend.title = "Procedure",  # Legend title
- 
-    legend.labs = levels(data$Procedure),
-  palette = c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#C695DD","#E25869","#95CD9E","#8D3CE5"), # Custom color palette
-  ggtheme = theme_minimal() 
-  ) 
+    km_fit2, 
+    data = data %>% filter(!Procedure %in% c("Unknown", "No treatment")),  # Filtered data
+    risk.table = FALSE,       # Add number at risk table
+    pval = TRUE,              # Show p-value of log-rank test
+    # conf.int = TRUE,        # Show confidence intervals
+    xlab = "Years",           # X-axis label
+    ylab = "Probability of Survival",  # Y-axis label
+    legend.title = "Procedure",        # Legend title
+    legend.labs = filtered_levels,     # Use filtered levels for legend labels
+    palette = c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#C695DD", "#E25869"), # Custom color palette
+    ggtheme = theme_minimal())
 
 km_plot2$plot <- km_plot2$plot +
   theme(
@@ -638,11 +638,40 @@ km_plot2$plot <- km_plot2$plot +
     legend.text = element_text(size = 8)
   ) +
   labs(title = "Survival Curve by Treatment") +
-  guides(color = guide_legend(ncol = 3)) 
+  guides(color = guide_legend(ncol = 2)) 
 
 # Print the plot
 print(km_plot2)
 
+```
+
+*Table 5: All Cause Mortality Survival Confidence Intervals Table by Treatment* 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+allCT <- tidy(km_fit2)
+allCT[is.na(allCT)] <- 0
+
+allCT  <- allCT   %>%
+  filter(time %in% c(1,5,10,15)) %>%
+  mutate(value= paste0(100 * round(estimate,4), '(',100*round(conf.low,4), '-',100*round(conf.high,4), ')' ),
+        strata = gsub('Procedure=','',strata))%>%
+  select(time, strata,value)%>%
+  pivot_wider(values_from = value, names_from = time, values_fill = '0 (0-0)')%>%
+  rename(`1-year (95% CI)` = `1`,
+         `5-year (95% CI)` = `5`,
+         `10-year (95% CI)` = `10`,
+         `15-year (95% CI)` = `15`,
+         Treatment = strata)
+  
+kable(allCT,  format = "html", escape = FALSE, align = "c")%>%
+  kable_styling( full_width = FALSE) %>%
+  column_spec(1, bold = TRUE) %>%
+  footnote(general = "Values are n (%), unless otherwise indicated. Crude number and rate estimates of mortality from the study data. All-cause mortality estimated by Kaplan-Meier methods",
+           general_title = "", 
+           footnote_as_chunk = TRUE)
+
+rm(allC);rm(allCT);rm(km_fit);rm(km_fit2);rm(km_plot);rm(km_plot2)
 ```
 
 *Figure 14: All Cause Mortality Survival Curve by Surgery Treatment* 
@@ -685,7 +714,7 @@ print(km_plot2)
 
 ```
 
-*Table 5: All Cause Mortality Survival Confidence Intervals Table by Surgery Treatment* 
+*Table 6: All Cause Mortality Survival Confidence Intervals Table by Surgery Treatment* 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
 
@@ -758,7 +787,7 @@ tidycmprsk::cuminc(Surv(time, status2) ~ 1, data) %>%
 ```
   
   
-*Table 6: Cumulative Incidence of Death (CVD Death vs Other)*
+*Table 7: Cumulative Incidence of Death (CVD Death vs Other)*
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
@@ -809,7 +838,7 @@ tidycmprsk::cuminc(Surv(time, statusV)~1, data) %>%
 
   
   
-*Table 7: Cumulative Incidence of Death (including BC mortality)*
+*Table 8: Cumulative Incidence of Death (including BC mortality)*
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
 way3 <- tidy(tidycmprsk::cuminc(Surv(time, statusV)~1, data)) %>%
@@ -1008,7 +1037,7 @@ tidycmprsk::cuminc(Surv(time, statusV) ~ StageAtDx, data) %>%
 ##### 1. Subdistribution of Harzards 
 
 
-*Table 8: Hazard ratios (95% CI) from Subdistribution Hazard Model for Cardiac Death* 
+*Table 9: Hazard ratios (95% CI) from Subdistribution Hazard Model for Cardiac Death* 
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
 # Competing Risks Regression ----------------------------------------------
 
