@@ -38,6 +38,8 @@ cancer <- cancer.raw %>%
          AgeFollowUpStart = AgeDx + 1,   
          AgeDeath = ifelse(VitalStatus == 0,
                            AgeDx + (yy_dlc - ydiag), NA),
+         mm_dx = ifelse(is.na(mm_dx), 6, mm_dx),
+         mm_dlc = ifelse(is.na(mm_dlc), 6, mm_dlc),
          DiagnosisDate = make_date(year = ydiag, month = mm_dx, day = 1),
          FollowUpStart = DiagnosisDate %m+% years(1),
          FollowUpEnd = make_date(year = yy_dlc, month = mm_dlc, day = 1),
@@ -319,13 +321,13 @@ cvm_by_year_agegroup2 <- cancer_observed %>%
 ```{r exports}
 # Exporting file grouped by year and age groups 0-59 and 60+
 
-tryCatch({
-  write.csv(cvm_by_year_agegroup1, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cvm_by_year_agegroup1.csv")
-}, error = function(e) {
-  write.csv(cvm_by_year_agegroup1, "~/Downloads/Registro Central de Cancer/cvm_by_year_agegroup1.csv")
-}, error = function(e) {
-  write.csv(cvm_by_year_agegroup1, "~/../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cvm_by_year_agegroup1.csv")
-})
+# tryCatch({
+#   write.csv(cvm_by_year_agegroup1, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cvm_by_year_agegroup1.csv")
+# }, error = function(e) {
+#   write.csv(cvm_by_year_agegroup1, "~/Downloads/Registro Central de Cancer/cvm_by_year_agegroup1.csv")
+# }, error = function(e) {
+#   write.csv(cvm_by_year_agegroup1, "~/../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cvm_by_year_agegroup1.csv")
+# })
 
 # Exporting file grouped by year and age groups 0-59, 60-69, 70-79, 80+
 tryCatch({
