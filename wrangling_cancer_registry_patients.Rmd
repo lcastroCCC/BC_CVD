@@ -63,7 +63,8 @@ cancer <- cancer.raw %>%
    select(EncryptedID, 
           mm_dx, ydiag, DiagnosisDate, FollowUpStart, AgeDx, birth_date, AgeFollowUpStart, 
           mm_dlc, yy_dlc, FollowUpEnd, FollowUpYears, AgeDeath, FollowUpYears,
-          AgeDeathCat, AgeDeathCat2, Vital, cvdStatus, SurvivalTime, maritallabel, Surgery, Radiotherapy, Chemotherapy)
+          AgeDeathCat, AgeDeathCat2, Vital, cvdStatus, SurvivalTime, maritallabel, Surgery, Radiotherapy, Chemotherapy,
+          Comorb)
 
 # Reviewing exclusions | 65
 exclusions <- cancer %>%   

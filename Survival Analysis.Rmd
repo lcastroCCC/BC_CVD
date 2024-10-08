@@ -14,11 +14,6 @@ knitr::opts_chunk$set(warning = FALSE, message = FALSE)
 ```
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
-# Working Directory -------------------------------------------------------
-
-#setwd("C:/Users/enavarro/Documents/BBC/Project- Dra. Carola/Data")
-#setwd("C:/Users/gabri/OneDrive/Documents/CCC/Project Dra. CSanchez/Data")
-#setwd("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data")
 
 # Libraries ---------------------------------------------------------------
 
@@ -605,7 +600,7 @@ ggplot() +
   )
 ```
 
-*Figure 12: CVD Specific Mortality Survival Curve* 
+*Figure 13: CVD Specific Mortality Survival Curve* 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 # Fit the Kaplan-Meier survival model
@@ -619,16 +614,16 @@ km_plot <- ggsurvplot(
   km_fit, 
   data = allCVD,
   risk.table = TRUE,       # Add number at risk table
- # pval = TRUE,             # Show p-value of log-rank test (although not relevant here)
-  conf.int = TRUE,         # Show confidence intervals
-  xlab = "Years",          # X-axis label
-  ylab = "Probability of Survival", # Y-axis label
-  ggtheme = theme_minimal() # Theme
+ # pval = TRUE,            
+  conf.int = TRUE,       
+  xlab = "Years",          
+  ylab = "Probability of Survival", 
+ conf.int.fill = "red",
+ ggtheme = theme_minimal() 
 )
 
 km_plot$plot <- km_plot$plot +
-  theme(
-    plot.title = element_text(size = 14, face = "bold"),
+  theme(plot.title = element_text(size = 14, face = "bold"),
     axis.title.x = element_text(size = 12),
     axis.title.y = element_text(size = 12)
   ) +
@@ -669,7 +664,7 @@ kable(allCT,  format = "html", escape = FALSE, align = "c")%>%
 
 ```
 
-*Figure 13: CVD Specific Mortality Survival Curve by Treatment* 
+*Figure 14: CVD Specific Mortality Survival Curve by Treatment* 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 # Fit the Kaplan-Meier survival model
@@ -745,7 +740,7 @@ kable(allCT,  format = "html", escape = FALSE, align = "c")%>%
 rm(allC);rm(allCT);rm(km_fit);rm(km_fit2);rm(km_plot);rm(km_plot2)
 ```
 
-*Figure 14: CVD Specific Mortality Survival Curve by Surgery Treatment* 
+*Figure 15: CVD Specific Mortality Survival Curve by Surgery Treatment* 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 # Fit the Kaplan-Meier survival model
@@ -823,7 +818,7 @@ rm(allC);rm(allCT);rm(km_fit);rm(km_fit2);rm(km_plot);rm(km_plot2)
 ```
 
 
-*Figure 15: CVD Specific Mortality Survival Curve by Marital Status* 
+*Figure 16: CVD Specific Mortality Survival Curve by Marital Status* 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 # Fit the Kaplan-Meier survival model
@@ -897,7 +892,7 @@ kable(allCT,  format = "html", escape = FALSE, align = "c")%>%
 rm(allC);rm(allCT);rm(km_fit);rm(km_fit2);rm(km_plot);rm(km_plot2)
 ```
 
-*Figure 16: CVD Specific Mortality Survival Curve by Year of Diagnosis* 
+*Figure 17: CVD Specific Mortality Survival Curve by Year of Diagnosis* 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 # Fit the Kaplan-Meier survival model
@@ -968,7 +963,7 @@ kable(allCT,  format = "html", escape = FALSE, align = "c")%>%
 rm(allC);rm(allCT);rm(km_fit);rm(km_fit2);rm(km_plot);rm(km_plot2)
 ```
 
-*Figure 17: CVD Specific Mortality Survival Curve by Comorbidity* 
+*Figure 18: CVD Specific Mortality Survival Curve by Comorbidity* 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 data.Comorb <- allCVD %>%
@@ -1044,7 +1039,7 @@ rm(allC);rm(allCT);rm(km_fit);rm(km_fit2);rm(km_plot);rm(km_plot2)
 If the goal is to assess cardiac death mortality, both death related to breast cancer 
 and other causes are competing events.   
 
-*Figure 15: Cumulative incidence functions (1 = Cardiac death ; 2 = Other cause death)* 
+*Figure 19: Cumulative incidence functions (1 = Cardiac death ; 2 = Other cause death)* 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
 # Calculating CIF ----------------------------------------------
@@ -1116,7 +1111,7 @@ kable(way2,  format = "html", escape = FALSE, align = "c")%>%
 ```
   
   
-*Figure 16: Cumulative incidence functions (1 = Cardiac death ; 2 = Breast Cancer death, 3 = Other Cause death)* 
+*Figure 20: Cumulative incidence functions (1 = Cardiac death ; 2 = Breast Cancer death, 3 = Other Cause death)* 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
@@ -1173,7 +1168,7 @@ kable(way3,  format = "html", escape = FALSE, align = "c")%>%
 
 #### **IV. Cumulative Incidence Curves for CVD Mortality **
 
-*Figure 17: CIF for CVD Mortality by Treatment* 
+*Figure 21: CIF for CVD Mortality by Treatment* 
 
 
 ```{r echo=FALSE, fig.height=8, fig.width=12, message=FALSE, warning=FALSE, paged.print=FALSE}
@@ -1213,7 +1208,7 @@ tidycmprsk::cuminc(Surv(time, status2) ~ AgeDxCat, data) %>%
 
 ```
 
-*Figure 19: CIF for CVD Mortality by Comorbidity* 
+*Figure 22: CIF for CVD Mortality by Comorbidity* 
 
 ```{r echo=FALSE,fig.height=8, fig.width=12, message=FALSE, warning=FALSE, paged.print=FALSE}
 
@@ -1234,7 +1229,7 @@ tidycmprsk::cuminc(Surv(time, statusV) ~ Comorb.cat , data) %>%
 
 ```
 
-*Figure 20: CIF for BC Mortality by Comorbidity* 
+*Figure 23: CIF for BC Mortality by Comorbidity* 
 
 ```{r echo=FALSE,fig.height=8, fig.width=12, message=FALSE, warning=FALSE, paged.print=FALSE}
 
@@ -1254,7 +1249,7 @@ tidycmprsk::cuminc(Surv(time, statusV) ~ Comorb.cat , data) %>%
 
 ```
 
-*Figure 21: Cumulative incidence curves for CVD and BC Mortality by Comorbidity* 
+*Figure 24: Cumulative incidence curves for CVD and BC Mortality by Comorbidity* 
 
 ```{r echo=FALSE,fig.height=8, fig.width=12, message=FALSE, warning=FALSE, paged.print=FALSE}
 options("ggsurvfit.switch-color-linetype" = TRUE)
@@ -1282,7 +1277,7 @@ tidycmprsk::cuminc(Surv(time, statusV) ~ Comorb.cat , data) %>%
 
 ```
 
-*Figure 22: Cumulative incidence curves for CVD Mortality by Stage at Diagnosis* 
+*Figure 25: Cumulative incidence curves for CVD Mortality by Stage at Diagnosis* 
 
 ```{r echo=FALSE, fig.height=8, fig.width=12, message=FALSE, warning=FALSE, paged.print=FALSE}
 options("ggsurvfit.switch-color-linetype" = FALSE)
@@ -1303,7 +1298,7 @@ tidycmprsk::cuminc(Surv(time, statusV) ~ StageAtDx , data) %>%
 
 ```
 
-*Figure 23: Cumulative incidence curves for BC Mortality by Stage at Diagnosis* 
+*Figure 26: Cumulative incidence curves for BC Mortality by Stage at Diagnosis* 
 
 ```{r echo=FALSE, fig.height=8, fig.width=12, message=FALSE, warning=FALSE, paged.print=FALSE}
 
@@ -1323,7 +1318,7 @@ tidycmprsk::cuminc(Surv(time, statusV) ~ StageAtDx , data) %>%
 
 ```
 
-*Figure 24: Cumulative incidence curves for CVD and BC Mortality by Stage at Diagnosis* 
+*Figure 27: Cumulative incidence curves for CVD and BC Mortality by Stage at Diagnosis* 
 
 ```{r echo=FALSE, fig.height=8, fig.width=12, message=FALSE, warning=FALSE, paged.print=FALSE}
 options("ggsurvfit.switch-color-linetype" = FALSE)
@@ -1365,7 +1360,7 @@ model %>%
 
 #### Forest Plot of Hazard Ratios
 
-*Figure 25: Subdistribution HR (95% CI) by Stage at Diagnosis* 
+*Figure 28: Subdistribution HR (95% CI) by Stage at Diagnosis* 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
@@ -1404,7 +1399,7 @@ ggplot(hr_stage, aes(x = HR, y = group)) +
 
 ```
 
-*Figure 26: Subdistribution HR (95% CI) by Treatment* 
+*Figure 29: Subdistribution HR (95% CI) by Treatment* 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
@@ -1432,7 +1427,7 @@ ggplot(hr_trt, aes(x = HR, y = group)) +
 
 ```
 
-*Figure 27: Subdistribution HR (95% CI) by Comorbidity* 
+*Figure 30: Subdistribution HR (95% CI) by Comorbidity* 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
