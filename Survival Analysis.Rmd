@@ -1088,6 +1088,22 @@ ggcompetingrisks(cuminc_fit, conf.int = TRUE, multiple_panels = TRUE) +
     values = c("1" = "red", "2" = "black"),   
     labels = c("1" = "Cardiac Death", "2" = "Other Causes of Death")) 
 
+# Another way 2024-10-09
+library(cmprsk)
+ 
+# Using cuminc from cmprsk package
+cuminc_fit <- cuminc(ftime = data$time, fstatus = data$status2, group = data$AgeDxCat)
+
+ggcompetingrisks(cuminc_fit, conf.int = TRUE, multiple_panels = TRUE) +
+ scale_fill_manual(
+    name = "Cause of Death",                 
+    values = c("1" = "red", "2" = "black"),   
+    labels = c("1" = "Cardiac Death", "2" = "Other Causes of Death") ) +
+  scale_color_manual(
+    name = "Cause of Death",                  
+    values = c("1" = "red", "2" = "black"),   
+    labels = c("1" = "Cardiac Death", "2" = "Other Causes of Death")) 
+
 ```
   
   
