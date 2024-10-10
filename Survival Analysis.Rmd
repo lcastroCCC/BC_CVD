@@ -282,48 +282,75 @@ Below is the overall proposed analysis strategy to meet the study objectives:
 
 # Descriptive Analysis ----------------------------------------------------
 
+fisher_sim_p <- function(data, variable, by, ...) {
+  result <- list()
+  result$p <- stats::fisher.test(x = data %>% pull({{variable}}), y = data %>% pull({{by}}), simulate.p.value = T)$p.value
+  result$test <- "Fisher's test with simulated p-value"
+  result
+}
+
 data %>%
-  select(c(Vital, Procedure, StageAtDx, AgeDxCat, ER, PR, HER2.cat, CsumCat, `Myocardial Infarction`, `Congestive heart failure`, `Peripheral vascular disease`, `Cerebrovascular disease`, `Chronic pulmonary disease`, `Diabetes without chronic complication`, `Diabetes with chronic complication`, HealthRegion)) %>%
+  select(c(Vital, AgeDx, AgeDxCat, AgeFU, time, HealthRegion, maritallabel, Procedure, StageAtDx, ER, PR, HER2.cat, CsumCat, `Myocardial Infarction`, `Congestive heart failure`, `Peripheral vascular disease`, `Cerebrovascular disease`, `Chronic pulmonary disease`, `Diabetes without chronic complication`, `Diabetes with chronic complication`)) %>%
   filter(Vital != "Alive", !is.na(AgeDxCat)) %>% 
  tbl_summary(by = Vital,
-              label = c(Procedure ~ "Treatment",
+              label = c(AgeDx ~ "Age at Diagnosis (Continuous)",
+                        AgeDxCat ~ "Age at Diagnosis (Categorical)",
+                        AgeFU ~ "Age at Death",
+                        time ~ "Time to death (years)",
+                        HealthRegion ~ "Health Region",
+                        maritallabel ~ "Marital Status",
+                        Procedure ~ "Treatment",
                         StageAtDx ~ "Stage at Diagnosis",
-                        AgeDxCat ~ "Age at Diagnosis",
+                        AgeDxCat ~ "Age at Diagnosis (Categorical)",
                         ER ~ "ER Assay",
                         PR ~ "PR Assay",
                         HER2.cat ~ "HER2", 
-                        CsumCat ~ "Comorbidities",
-                        HealthRegion ~ "Health Region")) %>%
- add_overall(col_label = "**All death causes**  \nN = {style_number(N)}") %>%
-  modify_footnote(everything() ~ NA) %>%
-  modify_caption("**Table 1: Baseline Characteristics of Study Population**") %>%
- modify_column_hide(columns = "stat_3") %>%
-  as_gt() %>%
- gt::tab_source_note("Note: Values are N (%), unless otherwise indicated.")
-
-```
-
-*Table 2: Summary statistics by mortality type*
-
-```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
-
-data %>%
-  filter(Vital != "Alive", AgeDx != 999) %>% 
-  select(c(Vital, AgeDx, AgeFU, time)) %>%
- tbl_summary(by = Vital,
-              label = c(AgeDx ~ "Age at Diagnosis",
-                       AgeFU ~ "Age at Death",
-                       time ~ "Time to death (years)"),
+                        CsumCat ~ "Comorbidities"),
              type = all_continuous() ~ "continuous2",
              statistic = list(all_continuous() ~ c(
       "{mean}(±{sd})",
       "{median} ({p25}-{p75})",
       "{min}-{max}"),
-    all_categorical() ~ "{n} ({p}%)"))  %>%
-  modify_column_hide(columns = "stat_3") %>%
-    add_overall(col_label = "**All death causes**  \nN = {style_number(N)}") %>%
-   modify_footnote(everything() ~ NA) %>%
-  modify_caption("**Table 2: Summary statistics by mortality type**")
+    all_categorical() ~ "{n} ({p}%)")) %>%
+  add_overall(col_label = "**All death causes**  \nN = {style_number(N)}") %>%
+add_p(
+    test = list(
+      all_continuous() ~ "oneway.test", # Welch's ANOVA due to no assumption of homogeneity of variances
+      c(CsumCat, `Diabetes with chronic complication`, Procedure, HER2.cat,  HealthRegion, `Myocardial Infarction`) ~ "fisher_sim_p", # Simulated p-values
+      all_categorical() ~ "chisq.test"  # Default chi-square for most variables
+      
+    )) %>%
+  modify_footnote(everything() ~ NA) %>%
+  modify_caption("**Table 1: Baseline Characteristics of Study Population**") #%>%
+ #modify_column_hide(columns = "stat_3") #%>%
+  #as_gt() %>%
+# gt::tab_source_note("Note: Values are N (%), unless otherwise indicated.")
+
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# *Table 2: Summary statistics by mortality type*
+
+  # 
+# data %>%
+#   filter(Vital != "Alive", AgeDx != 999) %>% 
+#   select(c(Vital, AgeDx, AgeFU, time)) %>%
+#  tbl_summary(by = Vital,
+#               label = c(AgeDx ~ "Age at Diagnosis",
+#                        AgeFU ~ "Age at Death",
+#                        time ~ "Time to death (years)"),
+#              type = all_continuous() ~ "continuous2",
+#              statistic = list(all_continuous() ~ c(
+#       "{mean}(±{sd})",
+#       "{median} ({p25}-{p75})",
+#       "{min}-{max}"),
+#     all_categorical() ~ "{n} ({p}%)"))  %>%
+#   modify_column_hide(columns = "stat_3") %>%
+#     add_overall(col_label = "**All death causes**  \nN = {style_number(N)}") %>%
+#    modify_footnote(everything() ~ NA) %>%
+#   modify_caption("**Table 2: Summary statistics by mortality type**")
 
 
 ```
@@ -752,8 +779,9 @@ km_fit2 <- survfit(coxph(Surv(time, status1) ~ strata(Procedure) + AgeDxCat,
                          data = surgery_data))
 # km_fit2 <- survfit(Surv(time, status1)~Procedure, data = surgery_data)
 
-km_plot2 <- ggsurvplot(
+km_plot2 <- ggsurvplot_facet(
   km_fit2, 
+ facet.by = "Procedure",
   data = surgery_data,
   risk.table = FALSE,       # Add number at risk table
   #pval = TRUE, 
@@ -1361,10 +1389,13 @@ tidycmprsk::cuminc(Surv(time, statusV) ~ StageAtDx, data) %>%
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
 # Competing Risks Regression ----------------------------------------------
 
+time <- data$time
+status2 <- data$status2
+StageAtDx <- data$StageAtDx
+Comorb_cat <- data$Comorb.cat
+Procedure <- data$Procedure
 
-
-model <- crr(Surv(time,status2) ~ StageAtDx +Comorb.cat+
-                         Procedure, data = data)
+model <- crr(ftime = time, fstatus = status2, cov1 = cbind(StageAtDx, Comorb_cat, Procedure))
 
 model %>%
    tbl_regression(exp = TRUE)
