@@ -1066,15 +1066,27 @@ tidycmprsk::cuminc(Surv(time, status2) ~ 1, data) %>%
   scale_fill_manual(
   values = c("1" = "red", "2" = "black"))+  # Show legend for lines
   scale_color_manual(values = c("red", "black"),
-  labels = c("1" = "Cardiac Death", "2"  = "Other Causes of Death")) #+
-  # add_risktable(times = c(5, 10, 15),
-  #               risktable_stats = c("{format(round(n.risk, 2), nsmall = 2)}",
-  #                     "{format(round(n.event, 2), nsmall = 2)}"),
-  #                stats_label = c("N effective patients at risk",
-  #                 "N effective events")
-  # )
+  labels = c("1" = "Cardiac Death", "2"  = "Other Causes of Death"))
 
   
+```
+
+```{r testing_new_code}
+# Another way 2024-10-09
+library(cmprsk)
+ 
+# Using cuminc from cmprsk package
+cuminc_fit <- cuminc(ftime = data$time, fstatus = data$status2, group = data$AgeDxCat)
+
+ggcompetingrisks(cuminc_fit, conf.int = TRUE, multiple_panels = TRUE) +
+ scale_fill_manual(
+    name = "Cause of Death",                 
+    values = c("1" = "red", "2" = "black"),   
+    labels = c("1" = "Cardiac Death", "2" = "Other Causes of Death") ) +
+  scale_color_manual(
+    name = "Cause of Death",                  
+    values = c("1" = "red", "2" = "black"),   
+    labels = c("1" = "Cardiac Death", "2" = "Other Causes of Death")) 
 
 ```
   
