@@ -236,6 +236,30 @@ cvd_rates_gen2 <- left_join(clean_n_cvd_deaths_gen2, census2, by = c("current_da
 
 ```
 
+```{r adding_2000_US_standardization}
+stdpop.18ages <- read.table("~/Downloads/stdpop.singleagesthru84.txt", 
+                            colClasses = "character",
+                            quote="\"", comment.char="") %>%
+  filter(startsWith(V1, "2000")) %>%
+  mutate(Year = substr(V1, 1, 4),               
+         Age_Group = as.numeric(substr(V1, 5, 6)),
+         Std_Population = as.numeric(substr(V1, 10, 18)),
+         Age_Group_Cat = age_mapping) %>%
+  select(-c(Year, V1)) %>%
+  mutate(Age_Group_Cat2 = case_when(
+    Age_Group >= 1 & Age_Group <= 12 ~ "0-59",  
+    Age_Group >= 13 & Age_Group <= 14 ~ "60-69",  
+    Age_Group >= 15 & Age_Group <= 16 ~ "70-79",  
+    Age_Group >= 17 ~ "80+",  
+    TRUE ~ NA_character_))
+
+std_age_groups <- stdpop.18ages %>%
+  group_by(Age_Group_Cat2) %>%
+  summarise(Std_Population = sum(Std_Population))
+
+test <- left_join(cvd_rates_gen1, std_age_groups, by = c("Population" = "Year")
+```
+
 ```{r exporting_gen_pop_rates, echo = FALSE}
 
 # Exporting general population rates by age groups 0-59 and 60+
