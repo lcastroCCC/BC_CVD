@@ -779,9 +779,8 @@ km_fit2 <- survfit(coxph(Surv(time, status1) ~ strata(Procedure) + AgeDxCat,
                          data = surgery_data))
 # km_fit2 <- survfit(Surv(time, status1)~Procedure, data = surgery_data)
 
-km_plot2 <- ggsurvplot_facet(
+km_plot2 <- ggsurvplot(
   km_fit2, 
- facet.by = "Procedure",
   data = surgery_data,
   risk.table = FALSE,       # Add number at risk table
   #pval = TRUE, 
