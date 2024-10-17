@@ -59,12 +59,13 @@ cancer <- cancer.raw %>%
                                          )))),
          SurvivalTime = ifelse(VitalStatus == 1, NA,
                                ifelse(VitalStatus == 0 & FollowUpYears > 0,
-                                      FollowUpYears, 0))) %>%
+                                      FollowUpYears, 0)),
+         DxCity = str_to_title(DxCity)) %>%
    select(EncryptedID, 
           mm_dx, ydiag, DiagnosisDate, FollowUpStart, AgeDx, birth_date, AgeFollowUpStart, 
           mm_dlc, yy_dlc, FollowUpEnd, FollowUpYears, AgeDeath, FollowUpYears,
           AgeDeathCat, AgeDeathCat2, Vital, cvdStatus, SurvivalTime, maritallabel, Surgery, Radiotherapy, Chemotherapy,
-          Comorb)
+          Comorb, DxCounty, DxCity, HealthRegion)
 
 # Reviewing exclusions | 65
 exclusions <- cancer %>%   

@@ -19,6 +19,14 @@ library(gtsummary)
 library(dplyr)
 library(purrr)
 library(tidyr)
+library(stringr)
+
+library(ggmap)
+library (ggthemes)
+library(sf)
+library (tigris)
+
+options(tigris_class = "sf")
 
 ```
 
@@ -112,6 +120,7 @@ read_and_process_file <- function(year) {
     rename_all(~ snakecase::to_any_case(., case = "snake")) %>%
     select(
       record_type,
+      county_of_occurrence_fips,
       detail_age_unit, 
       detail_age, 
       sex,
@@ -127,6 +136,7 @@ read_and_process_file <- function(year) {
       detail_age_unit  = as.numeric(detail_age_unit), 
       detail_age  = as.numeric(detail_age), 
       current_data_year  = as.numeric(current_data_year), 
+      county_of_occurrence_fips  = as.numeric(county_of_occurrence_fips), 
       across(
         c(icd_code_10_th_revision, `1_st_condition`, `2_nd_condition`, `3_rd_condition`), 
         ~ sub("^(.{3})(.)", "\\1.\\2", .))) # Insert a period after the third character for any 4-character string
@@ -139,6 +149,24 @@ read_and_process_file <- function(year) {
 mort <- map_dfr(years, read_and_process_file)
 
          
+```
+
+```{r adding_geo_information, include = FALSE}
+
+# Import file with counties and their coordinates
+pr_sf <- counties (state = "PR", cb = TRUE)
+
+# Joining our NCHS mortality data with shape file
+geo_mort <- mort %>%
+  mutate(county_of_occurrence_fips = ifelse(county_of_occurrence_fips == 999, NA, # If no information for county, make NA
+                                            paste0(72, sprintf("%03d", county_of_occurrence_fips)))) %>% # Making FIPS codes identical
+    left_join(pr_sf, by = c("county_of_occurrence_fips" = "GEOID")) %>% # Joining files
+  filter(!is.na(NAME)) # Removing counties with less than 100k in population due to no geometry
+
+ggplot (data = pr_sf) +
+  geom_sf (fill = '#A9A9A9', color = "white" , aes (geometry = geometry, fill=NA)) +
+  theme_tufte()
+
 ```
 
 ```{r filtering_cvd_gen, echo = FALSE}
@@ -239,15 +267,18 @@ cvd_rates_gen2 <- left_join(clean_n_cvd_deaths_gen2, census2, by = c("current_da
 ```
 
 ```{r adding_2000_US_standardization}
-stdpop.singleages <- tryCatch({
-  read.table("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/2000 US Std Population/stdpop.singleagesthru84.txt", 
-                            colClasses = "character",
-                            quote="\"", comment.char="")
-}, error = function(e) {
- read.table("~/Downloads/stdpop.singleagesthru84.txt", 
-                            colClasses = "character",
-                            quote="\"", comment.char="")
-}) %>%
+
+#US 2000 Population by single ages
+
+stdpop.singleages <- suppressWarnings(
+  tryCatch({
+    read.table("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/2000 US Std Population/stdpop.singleagesthru84.txt", 
+               colClasses = "character", quote="\"", comment.char="")
+  }, error = function(e) {
+    read.table(file.path(Sys.getenv("HOME"), "Downloads/stdpop.singleagesthru84.txt"), 
+               colClasses = "character", quote="\"", comment.char="")
+  })
+) %>%
   filter(startsWith(V1, "20")) %>%
   mutate(Age = as.numeric(substr(V1, 5, 6)),
          Std_Population = as.numeric(substr(V1, 8, 18))) %>%
@@ -260,19 +291,35 @@ stdpop.singleages <- tryCatch({
     Age >= 80 ~ "80+",  
     TRUE ~ NA_character_))
 
+# Grouped into 18-59, 60-69, 70-79, 80+
+
 std_age_groups <- stdpop.singleages %>%
   group_by(Age_Group) %>%
   summarise(Std_Population = sum(Std_Population)) %>%
 mutate(weight = Std_Population/ sum(Std_Population))
 
+# Integrating into general pop rates
 test <- left_join(cvd_rates_gen2, std_age_groups, by = c("AgeDeathCat2" = "Age_Group")) %>%
-  mutate(adjusted_gen_cvd_rate = gen_cvd_rate * weight)
+  mutate(adj_gen_cvd_rate = gen_cvd_rate * weight)
 
+# Comparison of rate and adjusted rate by year
+# test %>%
+#   filter(current_data_year == 2015) %>%
+#   summarise(total_gen_cvd_rate = sum(n)/ sum(Population) * 1000,
+#             adj_gen_cvd_rate = sum(adj_gen_cvd_rate))
+
+# gpt
 test %>%
-  group_by(current_data_year) %>% 
-  summarise(total_gen_cvd_rate = sum(n)/ sum(Population) * 1000,
-            adjusted_gen_cvd_rate = sum(adjusted_gen_cvd_rate))
+  filter(current_data_year == 2015) %>%
+  bind_rows(summarise(., 
+                      current_data_year = "Total",
+                      gen_cvd_rate = sum(n) / sum(Population) * 1000,
+                      adj_gen_cvd_rate = sum(adj_gen_cvd_rate)))
 
+# japanese study: age adjusted death rate
+# observed death rate in age group * population of age group in standard pop
+# / total population in standard pop
+# death rate i * std pop i / total std pop
 
 table <- data.frame(currentpop = c(24819361, 82800702, 54473365, 31750716), 
                     n =          c(7123157, 23681001, 13291501, 3810086), 
