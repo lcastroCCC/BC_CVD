@@ -221,6 +221,7 @@ cvd_rates_gen1 <- left_join(clean_n_cvd_deaths_gen, census1, by = c("current_dat
   mutate(Population2 = (Population - PersonYears)) %>%
   select(-c(Population, PersonYears)) %>%
   rename(Population = Population2) %>%
+  group_by(current_data_year) %>%
   mutate(gen_cvd_rate = (n/ Population) * 1000); cvd_rates_gen1
 
 
@@ -231,33 +232,56 @@ cvd_rates_gen2 <- left_join(clean_n_cvd_deaths_gen2, census2, by = c("current_da
   mutate(Population2 = (Population - PersonYears)) %>%
   select(-c(Population, PersonYears)) %>%
   rename(Population = Population2) %>%
+  group_by(current_data_year) %>%
   mutate(gen_cvd_rate = (n/ Population) * 1000); cvd_rates_gen2
 
 
 ```
 
 ```{r adding_2000_US_standardization}
-stdpop.18ages <- read.table("~/Downloads/stdpop.singleagesthru84.txt", 
+stdpop.singleages <- tryCatch({
+  read.table("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/2000 US Std Population/stdpop.singleagesthru84.txt", 
                             colClasses = "character",
-                            quote="\"", comment.char="") %>%
-  filter(startsWith(V1, "2000")) %>%
-  mutate(Year = substr(V1, 1, 4),               
-         Age_Group = as.numeric(substr(V1, 5, 6)),
-         Std_Population = as.numeric(substr(V1, 10, 18)),
-         Age_Group_Cat = age_mapping) %>%
-  select(-c(Year, V1)) %>%
-  mutate(Age_Group_Cat2 = case_when(
-    Age_Group >= 1 & Age_Group <= 12 ~ "0-59",  
-    Age_Group >= 13 & Age_Group <= 14 ~ "60-69",  
-    Age_Group >= 15 & Age_Group <= 16 ~ "70-79",  
-    Age_Group >= 17 ~ "80+",  
+                            quote="\"", comment.char="")
+}, error = function(e) {
+ read.table("~/Downloads/stdpop.singleagesthru84.txt", 
+                            colClasses = "character",
+                            quote="\"", comment.char="")
+}) %>%
+  filter(startsWith(V1, "20")) %>%
+  mutate(Age = as.numeric(substr(V1, 5, 6)),
+         Std_Population = as.numeric(substr(V1, 8, 18))) %>%
+  select(-V1) %>%
+  mutate(Age_Group = case_when(
+    Age >= 0 & Age <= 17 ~ "0-17", 
+    Age >= 18 & Age <= 59 ~ "18-59",  
+    Age >= 60 & Age <= 69 ~ "60-69",  
+    Age >= 70 & Age <= 79 ~ "70-79",  
+    Age >= 80 ~ "80+",  
     TRUE ~ NA_character_))
 
-std_age_groups <- stdpop.18ages %>%
-  group_by(Age_Group_Cat2) %>%
-  summarise(Std_Population = sum(Std_Population))
+std_age_groups <- stdpop.singleages %>%
+  group_by(Age_Group) %>%
+  summarise(Std_Population = sum(Std_Population)) %>%
+mutate(weight = Std_Population/ sum(Std_Population))
 
-test <- left_join(cvd_rates_gen1, std_age_groups, by = c("Population" = "Year")
+test <- left_join(cvd_rates_gen2, std_age_groups, by = c("AgeDeathCat2" = "Age_Group")) %>%
+  mutate(adjusted_gen_cvd_rate = gen_cvd_rate * weight)
+
+test %>%
+  group_by(current_data_year) %>% 
+  summarise(total_gen_cvd_rate = sum(n)/ sum(Population) * 1000,
+            adjusted_gen_cvd_rate = sum(adjusted_gen_cvd_rate))
+
+
+table <- data.frame(currentpop = c(24819361, 82800702, 54473365, 31750716), 
+                    n =          c(7123157, 23681001, 13291501, 3810086), 
+                    weight =     c(0.12881, 0.401725, 0.299194, 0.170271)) %>% 
+         mutate(percent =       n/currentpop * 100, 
+         adjustment_factor =    percent * weight); table
+
+round(sum(table$adjustment_factor), 2)
+round(sum(table$n)/ sum(table$currentpop) * 100, 2)
 ```
 
 ```{r exporting_gen_pop_rates, echo = FALSE}
