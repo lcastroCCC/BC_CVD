@@ -1,6 +1,6 @@
 ---
 title: "Cardiac death mortality on breast cancer patients"
-date: "2024-06-19"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
 output:
   html_document:
     df_print: paged

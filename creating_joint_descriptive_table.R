@@ -26,6 +26,7 @@ cancer <- cancer.raw %>%
          AgeDeath = ifelse(VitalStatus == 0,
                            AgeDx + (yy_dlc - ydiag), NA),
          mm_dx = ifelse(is.na(mm_dx), 6, mm_dx),
+         yy_dlc = as.character(yy_dlc),
          mm_dlc = ifelse(is.na(mm_dlc), 6, mm_dlc),
          DiagnosisDate = make_date(year = ydiag, month = mm_dx, day = 1),
          FollowUpStart = DiagnosisDate %m+% years(1),
@@ -55,13 +56,6 @@ cancer <- cancer.raw %>%
          AgeDeathCat, AgeDeathCat2, Vital, cvdStatus, SurvivalTime, maritallabel, Surgery, Radiotherapy, Chemotherapy,
          Comorb, DxCounty, DxCity, HealthRegion)
 
-# Reviewing exclusions | 65
-exclusions <- cancer %>%   
-  filter(Vital == "CVD death",
-         FollowUpYears <= 0) %>%
-  select(Vital, AgeDx, DiagnosisDate, FollowUpEnd, SurvivalTime, Surgery, Radiotherapy, Chemotherapy)
-
-# Persons observed | 17,183
 cancer_observed <- cancer %>%
   filter(FollowUpYears > 0) 
 
@@ -71,9 +65,10 @@ gen_pop <- mort %>%
   filter(record_type == 1, # Resident of P.R.
          detail_age_unit == 1, # Age in years
          detail_age >= 18 &
-         detail_age != 999, # 18 years +
+           detail_age != 999, # 18 years +
          sex == "F") %>% # Female
-  mutate(maritallabel = ifelse(marital_status == "M", "Married",
+  mutate(current_data_year = as.character(current_data_year),
+         maritallabel = ifelse(marital_status == "M", "Married",
                                ifelse(marital_status == "U", "Unknown", "Unmarried")),
          AgeDeathCat = as.factor(case_when(detail_age >= 18 & detail_age <= 59 ~ "18-59",
                                            detail_age >= 60 & detail_age <= 69 ~ "60-69",
@@ -83,85 +78,66 @@ gen_pop <- mort %>%
   select(detail_age, current_data_year, AgeDeathCat, marital_status, maritallabel)
 
 
-# Marital Status by Source -------------------------------------------------
+# Create the summary table for breast cancer patients
+tbl_cancer <- cancer_observed %>%
+  filter(Vital != "Alive",
+         yy_dlc <= 2021) %>%
+  select(AgeDeath, AgeDeathCat2, yy_dlc) %>%
+  tbl_summary(
+    label = c(AgeDeath ~ "Age at Death",
+              yy_dlc ~ "Year of Death",
+              AgeDeathCat2 = "Age group"),  # Consistent label
+    statistic = list(all_categorical() ~ "{n} ({p}%)",
+                     all_continuous() ~ "{mean} ({sd})"),
+    digits = list(
+      all_categorical() ~ c(0, 2),
+      all_continuous() ~ c(2, 2)),
+    missing_text = "0"
+  ) %>%
+  modify_header(label = "**Breast Cancer Patients**") %>%  # Change column header
+  modify_footnote(
+    all_stat_cols() ~ NA  # Remove the default footnote for continuous variables
+  ) %>% 
+  modify_footnote(
+    all_stat_cols() ~ "For continuous variables: Mean (SD). For categorical variables: n (%)."  # Add custom footnote
+  )
+
+# Create the summary table for the general population (rename 'detail_age' to 'AgeDeath' for consistency)
+tbl_general <- gen_pop %>%
+  rename(AgeDeath = detail_age,
+         yy_dlc = current_data_year,
+         AgeDeathCat2 = AgeDeathCat) %>%  # Rename to ensure consistency
+  select(AgeDeath, yy_dlc, AgeDeathCat2) %>%
+  tbl_summary(
+    label = c(AgeDeath ~ "Age at Death",
+              yy_dlc ~ "Year of Death",
+              AgeDeathCat2 = "Age group"),  # Same label
+    statistic = list(all_categorical() ~ "{n} ({p}%)",
+                     all_continuous() ~ "{mean} ({sd})"),
+    digits = list(
+      all_categorical() ~ c(0, 2),
+      all_continuous() ~ c(2, 2)),
+    missing_text = "0"
+  ) %>%
+  modify_header(label = "**General Population**")  # Change column header
+
+# Merge the two summary tables side by side
+tbl_combined <- tbl_merge(
+  tbls = list(tbl_cancer, tbl_general),
+  tab_spanner = c("**Breast Cancer Patients**", "**General Population**")
+) %>% modify_caption("**Table 1: Baseline Characteristics of Population**") %>%
+  modify_header(label = "**Characteristic**") %>%  
+  modify_footnote(
+    all_stat_cols() ~ NA  # Remove the default footnote for continuous variables
+  ) %>% 
+  modify_footnote(
+    all_stat_cols() ~ "For continuous variables: Mean (SD). For categorical variables: n (%)."  # Add custom footnote
+  ) %>%
+  as_gt()
 
 
-# Extract marital status of breast cancer patients observed that died
-cancer_marital <- cancer_observed %>%
-  filter(Vital != "Alive") %>%
-  select(AgeDeath) %>%
-  rename(detail_age = AgeDeath) %>%
-  mutate(Source = "Breast cancer patients")
+# Print the combined table
+tbl_combined
 
-# Count occurrences by marital status in the general population data
-general_pop_marital <- gen_pop %>%
-  select(detail_age) %>%
-  mutate(Source = "General Population")
-
-comparison_df <- rbind(cancer_marital, general_pop_marital)
-
-comparison_df %>%
-  tbl_summary(by = Source,
-              label = c(detail_age ~ "Age Group at Death"),
-              statistic = list(all_categorical() ~ "{n} ({p}%)",
-                               all_continuous() ~ "{mean} ({sd})"),
-              digits = list(
-                all_categorical() ~ c(2, 2)), # Counts as integers, percentages with 2 decimal places
-              missing_text = "0")
-
-
-
-# Other statistics --------------------------------------------------------
-
-# Age at death summary 
-## General population
-summary(gen_pop$detail_age)
-## Cancer observed
-summary(cancer_observed$AgeDeath)
-
-# Age at death category table
-## General population
-table(gen_pop$AgeDeathCat)
-# Cancer observed
-table(cancer_observed$AgeDeathCat2)
-
-# Marital status table
-## General population
-table(gen_pop$maritallabel)
-## Cancer observed
-table(cancer_observed$maritallabel)
-
-
-# Age group at death by marital status table
-## General population
-table(gen_pop$AgeDeathCat, gen_pop$maritallabel)
-## Cancer observed
-table(cancer_observed$AgeDeathCat2, cancer_observed$maritallabel)
-
-
-# Marital status summary statistics
-## General population
-gen_pop %>%
-  group_by(maritallabel) %>%
-  summarize(
-    mean_age = mean(detail_age, na.rm = TRUE),
-    median_age = median(detail_age, na.rm = TRUE),
-    sd_age = sd(detail_age, na.rm = TRUE),
-    min_age = min(detail_age, na.rm = TRUE),
-    max_age = max(detail_age, na.rm = TRUE),
-    q1_age = quantile(detail_age, 0.25, na.rm = TRUE),
-    q3_age = quantile(detail_age, 0.75, na.rm = TRUE),
-    n = n())
-## Cancer observed
-cancer_observed %>%
-  group_by(maritallabel) %>%
-  summarize(
-    mean_age = mean(AgeDeath, na.rm = TRUE),
-    median_age = median(AgeDeath, na.rm = TRUE),
-    sd_age = sd(AgeDeath, na.rm = TRUE),
-    min_age = min(AgeDeath, na.rm = TRUE),
-    max_age = max(AgeDeath, na.rm = TRUE),
-    q1_age = quantile(AgeDeath, 0.25, na.rm = TRUE),
-    q3_age = quantile(AgeDeath, 0.75, na.rm = TRUE),
-    n = n())
-
+gt::gtsave(tbl_combined, "~/Downloads/summary_table.docx")
+gt::gtsave(tbl_combined, "~/Downloads/summary_table.html")

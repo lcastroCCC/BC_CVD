@@ -17,6 +17,7 @@ library(popEpi)
 library(Epi)
 library(data.table)  
 library(lubridate)
+library(stringr)
 
 ```
 
@@ -189,9 +190,9 @@ cancer <- cancer %>%
          FollowUpEnd = if_else(month(FollowUpEnd) == 1 & day(FollowUpEnd) == 1,
                         FollowUpEnd + days(1),  # If the date is January 1, add one day
                         FollowUpEnd),
-         maritallabel = ifelse(maritallabel == "unknown",
+         maritallabel = str_to_title(ifelse(maritallabel == "unknown",
                                NA,
-                               maritallabel),
+                               maritallabel)),
          Comorb.cat = factor(ifelse(Comorb == '0' , 'No', 
                              ifelse(as.numeric(Comorb) >= 1, 'Yes', 'Unknown')),
                              levels= c('Yes','No','Unknown')))
@@ -216,7 +217,7 @@ c <- lexpand(cancer_observed, status = cvdStatus != 0,
              entry = FollowUpStart, # Without those that did not meet follow-up
              exit = FollowUpEnd, 
              breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
-             aggre = list(agegroup = age, deathyear = per, ydiag, yearDiagCat, Comorb.cat))
+             aggre = list(agegroup = age, deathyear = per, ydiag, yearDiagCat, Comorb.cat, maritallabel))
 
 # Global SMR
 smr_global <- sir(coh.data = c, coh.obs = 'from0to1', 
@@ -249,7 +250,7 @@ smr_diag <- sir(coh.data = c, coh.obs = 'from0to1',
                   ref.data = gen_2, 
                   ref.rate = 'gen_cvd_rate', 
                   adjust = c('deathyear', 'agegroup'), 
-                  test.type = "homogeneity",
+                  test.type = "trend",
                   conf.type = "wald",
                   conf.level = 0.95,
                   print ='ydiag'); smr_diag
@@ -283,8 +284,7 @@ smr_agegroup <- sir(coh.data = c, coh.obs = 'from0to1',
 cat("SMR by comorbidity status. Filtering for Comorb status != Unknown and year of diagnosis >= 2010")
 
 # By comorbidity status
-comorb <- lexpand(cancer_observed[cancer_observed$Comorb.cat != "Unknown" &
-                                    cancer_observed$ydiag >= 2010, ],
+comorb <- lexpand(cancer_observed[cancer_observed$ydiag >= 2010, ],
                   status = cvdStatus != 0, 
              birth = birth_date,
              entry = FollowUpStart, # Without those that did not meet follow-up
@@ -304,16 +304,8 @@ smr_comorb <- sir(coh.data = comorb, coh.obs = 'from0to1',
 
 cat("SMR by marital status, filtering for marital status != Unknown")
 
-# Lexpand filtering out missing marital status
-filtered_marital <- lexpand(cancer_observed[ !is.na(cancer_observed$maritallabel), ], status = cvdStatus != 0, 
-             birth = birth_date,
-             entry = FollowUpStart, # Without those that did not meet follow-up
-             exit = FollowUpEnd, 
-             breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
-             aggre = list(agegroup = age, deathyear = per, maritallabel))
-
 # By marital status
-smr_marital <- sir(coh.data = filtered_marital, coh.obs = 'from0to1', 
+smr_marital <- sir(coh.data = c, coh.obs = 'from0to1', 
                   coh.pyrs = 'pyrs', 
                   ref.data = gen_2, 
                   ref.rate = 'gen_cvd_rate', 
@@ -353,66 +345,71 @@ writeData(wb, sheet = "By marital status", smr_marital)
 # Save the workbook
 saveWorkbook(wb, "~/Downloads/SMRs.xlsx", overwrite = TRUE)
 
+suppressWarnings(tryCatch({
+  saveWorkbook(wb, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/SMRs.xlsx", overwrite = TRUE)
+ }, error = function(e) {
+saveWorkbook(wb, "~/Downloads/SMRs.xlsx", overwrite = TRUE)
+ }))
 ```
 
 ```{r imputation_sensitivity, include = FALSE}
 
 # Without imputation
 
-old_cancer <- suppressWarnings(tryCatch({
-  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/old_cancer_cleansed.csv")
-}, error = function(e) {
-  read.csv("~/Downloads/Registro Central de Cancer/old_cancer_cleansed.csv")
-}, error = function(e) {
-  read.csv("~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/old_cancer_cleansed.csv")
-}))
-old_cancer <- old_cancer %>%
-  mutate(FollowUpStart = as.Date(FollowUpStart),
-         DiagnosisDate = as.Date(DiagnosisDate),
-         FollowUpEnd = as.Date(FollowUpEnd),
-         FollowUpEnd = if_else(month(FollowUpEnd) == 1 & day(FollowUpEnd) == 1,
-                        FollowUpEnd + days(1),  # If the date is January 1, add one day
-                        FollowUpEnd),
-         maritallabel = ifelse(maritallabel == "unknown",
-                               NA,
-                               maritallabel))
-old_cancer_observed <- old_cancer %>%
-  filter(FollowUpYears > 0)
-
-
-old_c <- lexpand(old_cancer_observed, status = cvdStatus != 0, 
-             birth = birth_date,
-             entry = FollowUpStart, # Without those that did not meet follow-up
-             exit = FollowUpEnd, 
-             breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
-             aggre = list(agegroup = age, deathyear = per))
-
-old_smr <- sir(coh.data = old_c, coh.obs = 'from0to1', 
-                  coh.pyrs = 'pyrs', 
-                  ref.data = gen_2, 
-                  ref.rate = 'gen_cvd_rate', 
-                  adjust = c('deathyear', 'agegroup'), 
-                  test.type = "homogeneity",
-                  conf.type = "wald",
-                  conf.level = 0.95); old_smr
-# With imputation
-
-smr_global # From chunk smr_with_follow_up
-
-
-# Graph
-results <- data.frame(
-  Dataset = c("Original", "Imputed"),
-  SMR = c(old_smr$sir, smr_global$sir),
-  LowerCI = c(old_smr$sir.lo, smr_global$sir.lo),
-  UpperCI = c(old_smr$sir.hi, smr_global$sir.hi))
-
-ggplot(results, aes(x = Dataset, y = SMR)) +
-  geom_point() +
-  geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI)) +
-  geom_text(aes(label = round(SMR, 2), vjust = 0.2, hjust = -0.5), size = 4) +
-  ylab("Standardized Mortality Ratio (SMR)") +
-  theme_minimal()
+# old_cancer <- suppressWarnings(tryCatch({
+#   read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/old_cancer_cleansed.csv")
+# }, error = function(e) {
+#   read.csv("~/Downloads/Registro Central de Cancer/old_cancer_cleansed.csv")
+# }, error = function(e) {
+#   read.csv("~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/old_cancer_cleansed.csv")
+# }))
+# old_cancer <- old_cancer %>%
+#   mutate(FollowUpStart = as.Date(FollowUpStart),
+#          DiagnosisDate = as.Date(DiagnosisDate),
+#          FollowUpEnd = as.Date(FollowUpEnd),
+#          FollowUpEnd = if_else(month(FollowUpEnd) == 1 & day(FollowUpEnd) == 1,
+#                         FollowUpEnd + days(1),  # If the date is January 1, add one day
+#                         FollowUpEnd),
+#          maritallabel = ifelse(maritallabel == "unknown",
+#                                NA,
+#                                maritallabel))
+# old_cancer_observed <- old_cancer %>%
+#   filter(FollowUpYears > 0)
+# 
+# 
+# old_c <- lexpand(old_cancer_observed, status = cvdStatus != 0, 
+#              birth = birth_date,
+#              entry = FollowUpStart, # Without those that did not meet follow-up
+#              exit = FollowUpEnd, 
+#              breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
+#              aggre = list(agegroup = age, deathyear = per))
+# 
+# old_smr <- sir(coh.data = old_c, coh.obs = 'from0to1', 
+#                   coh.pyrs = 'pyrs', 
+#                   ref.data = gen_2, 
+#                   ref.rate = 'gen_cvd_rate', 
+#                   adjust = c('deathyear', 'agegroup'), 
+#                   test.type = "homogeneity",
+#                   conf.type = "wald",
+#                   conf.level = 0.95); old_smr
+# # With imputation
+# 
+# smr_global # From chunk smr_with_follow_up
+# 
+# 
+# # Graph
+# results <- data.frame(
+#   Dataset = c("Original", "Imputed"),
+#   SMR = c(old_smr$sir, smr_global$sir),
+#   LowerCI = c(old_smr$sir.lo, smr_global$sir.lo),
+#   UpperCI = c(old_smr$sir.hi, smr_global$sir.hi))
+# 
+# ggplot(results, aes(x = Dataset, y = SMR)) +
+#   geom_point() +
+#   geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI)) +
+#   geom_text(aes(label = round(SMR, 2), vjust = 0.2, hjust = -0.5), size = 4) +
+#   ylab("Standardized Mortality Ratio (SMR)") +
+#   theme_minimal()
 
 ```
 

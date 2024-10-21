@@ -302,18 +302,15 @@ mutate(weight = Std_Population/ sum(Std_Population))
 test <- left_join(cvd_rates_gen2, std_age_groups, by = c("AgeDeathCat2" = "Age_Group")) %>%
   mutate(adj_gen_cvd_rate = gen_cvd_rate * weight)
 
-# Comparison of rate and adjusted rate by year
-# test %>%
-#   filter(current_data_year == 2015) %>%
-#   summarise(total_gen_cvd_rate = sum(n)/ sum(Population) * 1000,
-#             adj_gen_cvd_rate = sum(adj_gen_cvd_rate))
-
 # gpt
 test %>%
   filter(current_data_year == 2015) %>%
   bind_rows(summarise(., 
                       current_data_year = "Total",
+                      n = sum(n),
+                      Population = sum(Population),
                       gen_cvd_rate = sum(n) / sum(Population) * 1000,
+                      Std_Population = sum(Std_Population),
                       adj_gen_cvd_rate = sum(adj_gen_cvd_rate)))
 
 # japanese study: age adjusted death rate

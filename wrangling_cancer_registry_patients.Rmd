@@ -14,6 +14,8 @@ in the standard population
 library(readxl)
 library(gtsummary)
 library(tidyverse)
+library(lubridate)
+
 ```
 
 ```{r data_wrangling,  cache = TRUE}
