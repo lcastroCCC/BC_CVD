@@ -81,7 +81,7 @@ cancer_observed <- cancer %>%
 
 ```
 
-```{r person-years_by_years}
+```{r person-years_by_years, cache = TRUE}
 # Crear datos CVD deaths in BC patients -----------------------------------------------
 cat("Follow up period needs to be contemplated: `Follow-up period will be defined beginning 1 year after their first primary BC diagnosis (to estimate treatment completion) until date of last contact, death, or end up study period (December 31, 2020), whichever came first.`")
 
@@ -257,9 +257,9 @@ cvm_by_year_agegroup2 <- cancer_observed %>%
   rename(AgeGroup2 = AgeDeathCat2) %>%
   group_by(yy_dlc, AgeGroup2) %>%  # Agrupar por año de muerte
   summarize(cvd_deaths_BC = n(), .groups = "drop") %>%   # Contar muertes por año
-  bind_rows(data.frame(yy_dlc = c(2005, 2005, 2005, 2005, 2006, 2011, 2017, 2018),
-                       AgeGroup2 = c("18-59", "60-69", "70-79", "80+", "80+", "18-59", "18-59","18-59"),
-                       cvd_deaths_BC = c(0, 0,0, 0, 0,0,0,0))) %>%
+  bind_rows(data.frame(yy_dlc = c(2005, 2005, 2005, 2005, 2011, 2017),
+                       AgeGroup2 = c("18-59", "60-69", "70-79", "80+", "18-59", "18-59"),
+                       cvd_deaths_BC = c(0, 0, 0, 0, 0, 0))) %>%
   arrange(yy_dlc) %>% 
   rename(Year = yy_dlc) %>%  # Renombrar columna de año
   left_join(person_years_bc %>%  # Unir con person years por año
@@ -334,20 +334,20 @@ cvm_by_year_agegroup2 <- cancer_observed %>%
 # })
 
 # Exporting file grouped by year and age groups 0-59, 60-69, 70-79, 80+
-tryCatch({
+suppressWarnings(tryCatch({
   write.csv(cvm_by_year_agegroup2, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cvm_by_year_agegroup2.csv")
 }, error = function(e) {
   write.csv(cvm_by_year_agegroup2, "~/Downloads/Registro Central de Cancer/cvm_by_year_agegroup2.csv")
 }, error = function(e) {
   write.csv(cvm_by_year_agegroup2, "~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cvm_by_year_agegroup2.csv")
-})
+}))
 
 # Exporting cancer data for use in smr calculations
-tryCatch({
+suppressWarnings(tryCatch({
   write.csv(cancer, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_cleansed.csv")
 }, error = function(e) {
   write.csv(cancer, "~/Downloads/Registro Central de Cancer/cancer_cleansed.csv")
 }, error = function(e) {
   write.csv(cancer, "~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_cleansed.csv")
-})
+}))
 ```

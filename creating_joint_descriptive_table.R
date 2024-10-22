@@ -56,9 +56,10 @@ cancer <- cancer.raw %>%
          AgeDeathCat, AgeDeathCat2, Vital, cvdStatus, SurvivalTime, maritallabel, Surgery, Radiotherapy, Chemotherapy,
          Comorb, DxCounty, DxCity, HealthRegion)
 
-cancer_observed <- cancer %>%
-  filter(FollowUpYears > 0) 
-
+cancer_cvd_observed <- cancer %>%   
+  filter(Vital == "CVD death",
+         FollowUpYears > 0,
+         yy_dlc <= 2021) 
 # NCHS General Population Data --------------------------------------------
 
 gen_pop <- mort %>%
@@ -66,27 +67,32 @@ gen_pop <- mort %>%
          detail_age_unit == 1, # Age in years
          detail_age >= 18 &
            detail_age != 999, # 18 years +
-         sex == "F") %>% # Female
+         sex == "F", # Female
+         current_data_year != 2004, # Removing deaths outside follow-up period
+         grepl("^I(0|1[1,3]|2|3|4|5[0,1]|6|7[0-8])", `icd_code_10_th_revision`), # CVD fatalities
+         !grepl("^C50", `2_nd_condition`)|
+           !grepl("^C50", `3_rd_condition`)) %>% # Excluding BC fatalities 
   mutate(current_data_year = as.character(current_data_year),
          maritallabel = ifelse(marital_status == "M", "Married",
                                ifelse(marital_status == "U", "Unknown", "Unmarried")),
          AgeDeathCat = as.factor(case_when(detail_age >= 18 & detail_age <= 59 ~ "18-59",
-                                           detail_age >= 60 & detail_age <= 69 ~ "60-69",
-                                           detail_age >= 70 & detail_age <= 79 ~ "70-79",
-                                           detail_age >= 80 ~ "80+",
-                                           TRUE ~ NA))) %>%
-  select(detail_age, current_data_year, AgeDeathCat, marital_status, maritallabel)
+                                            detail_age >= 60 & detail_age <= 69 ~ "60-69",
+                                            detail_age >= 70 & detail_age <= 79 ~ "70-79",
+                                            detail_age >= 80 ~ "80+",
+                                            TRUE ~ NA))) %>%
+  select(detail_age, icd_code_10_th_revision, current_data_year, AgeDeathCat, marital_status, maritallabel)
 
+
+# Merging of tables -------------------------------------------------------
 
 # Create the summary table for breast cancer patients
-tbl_cancer <- cancer_observed %>%
-  filter(Vital != "Alive",
-         yy_dlc <= 2021) %>%
+tbl_cancer <- cancer_cvd_observed %>%
   select(AgeDeath, AgeDeathCat2, yy_dlc) %>%
+  mutate(yy_dlc = factor(yy_dlc, levels = 2005:2021)) %>%
   tbl_summary(
     label = c(AgeDeath ~ "Age at Death",
               yy_dlc ~ "Year of Death",
-              AgeDeathCat2 = "Age group"),  # Consistent label
+              AgeDeathCat2 = "Age group"),  
     statistic = list(all_categorical() ~ "{n} ({p}%)",
                      all_continuous() ~ "{mean} ({sd})"),
     digits = list(
@@ -94,24 +100,25 @@ tbl_cancer <- cancer_observed %>%
       all_continuous() ~ c(2, 2)),
     missing_text = "0"
   ) %>%
-  modify_header(label = "**Breast Cancer Patients**") %>%  # Change column header
+  modify_header(label = "**Breast Cancer Survivors**") %>%  
   modify_footnote(
-    all_stat_cols() ~ NA  # Remove the default footnote for continuous variables
+    all_stat_cols() ~ NA  
   ) %>% 
   modify_footnote(
-    all_stat_cols() ~ "For continuous variables: Mean (SD). For categorical variables: n (%)."  # Add custom footnote
+    all_stat_cols() ~ "For continuous variables: Mean (SD). For categorical variables: n (%)."  
   )
 
-# Create the summary table for the general population (rename 'detail_age' to 'AgeDeath' for consistency)
+
+# Create the summary table for the general population 
 tbl_general <- gen_pop %>%
   rename(AgeDeath = detail_age,
          yy_dlc = current_data_year,
-         AgeDeathCat2 = AgeDeathCat) %>%  # Rename to ensure consistency
+         AgeDeathCat2 = AgeDeathCat) %>%  
   select(AgeDeath, yy_dlc, AgeDeathCat2) %>%
   tbl_summary(
     label = c(AgeDeath ~ "Age at Death",
               yy_dlc ~ "Year of Death",
-              AgeDeathCat2 = "Age group"),  # Same label
+              AgeDeathCat2 = "Age group"),  
     statistic = list(all_categorical() ~ "{n} ({p}%)",
                      all_continuous() ~ "{mean} ({sd})"),
     digits = list(
@@ -119,19 +126,19 @@ tbl_general <- gen_pop %>%
       all_continuous() ~ c(2, 2)),
     missing_text = "0"
   ) %>%
-  modify_header(label = "**General Population**")  # Change column header
+  modify_header(label = "**General Population**") 
 
 # Merge the two summary tables side by side
 tbl_combined <- tbl_merge(
   tbls = list(tbl_cancer, tbl_general),
-  tab_spanner = c("**Breast Cancer Patients**", "**General Population**")
-) %>% modify_caption("**Table 1: Baseline Characteristics of Population**") %>%
+  tab_spanner = c("**Breast Cancer Survivors**", "**General Population**")) %>% 
+  modify_caption("**Table 1. Descriptive Summary of CVD Deaths by Population**") %>%
   modify_header(label = "**Characteristic**") %>%  
   modify_footnote(
-    all_stat_cols() ~ NA  # Remove the default footnote for continuous variables
+    all_stat_cols() ~ NA  
   ) %>% 
   modify_footnote(
-    all_stat_cols() ~ "For continuous variables: Mean (SD). For categorical variables: n (%)."  # Add custom footnote
+    all_stat_cols() ~ "For continuous variables: Mean (SD). For categorical variables: n (%)."  
   ) %>%
   as_gt()
 
@@ -139,5 +146,11 @@ tbl_combined <- tbl_merge(
 # Print the combined table
 tbl_combined
 
+addWorksheet(wb, "Table 1")
+writeData(wb, sheet = "Table 1", tbl_combined)
+
+# Exporting
 gt::gtsave(tbl_combined, "~/Downloads/summary_table.docx")
+gt::gtsave(tbl_combined, "~/Downloads/NCHS/summary_table.docx")
+
 gt::gtsave(tbl_combined, "~/Downloads/summary_table.html")
