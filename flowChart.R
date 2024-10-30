@@ -88,6 +88,7 @@ grViz(
         
         blank2[label = '', width = 0.01, height = 0.01]
         excluded2[label = <Excluded because of not meeting minimum of 12-month post-diagnosis (n={exclude2})>]
+
         
         blank1 -> blank2[dir = none];
         blank2 -> excluded2[minlen = 2];
