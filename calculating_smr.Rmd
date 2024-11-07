@@ -202,8 +202,8 @@ cancer$yearDiagCat <- cut(cancer$ydiag,
                    labels = c("2004-2009", "2010-2014", "2015-2019"),
                    right = TRUE)
 cancer$deathYearCat <- cut(cancer$yy_dlc, 
-                   breaks = c(2003, 2009, 2015, 2021), 
-                   labels = c("2004-2009", "2010-2015", "2016-2021"),
+                   breaks = c(2003, 2009, 2015, 2021, 2024), 
+                   labels = c("2004-2009", "2010-2015", "2016-2021", "2022-2024"),
                    right = TRUE)
 
 cancer_observed <- cancer %>%
@@ -214,6 +214,7 @@ cancer_observed <- cancer %>%
 ```{r smr_with_follow_up, echo = FALSE, include = FALSE}
 
 cat("Global SMR")
+
 
 # This function splits case-level observations by calendar time (per), age, and follow-up time
 c <- lexpand(cancer_observed, status = cvdStatus != 0, 
@@ -246,8 +247,56 @@ smr_year <- sir(coh.data = c, coh.obs = 'from0to1',
                   conf.level = 0.95,
                   print ='deathyear'); smr_year
 
-cat("SMR by year of diagnosis")
+cat("SMR by grouped year of death")
 
+gen_2_grouped <- gen_2 %>%
+    mutate(deathYearCat = case_when(
+        deathyear >= 2004 & deathyear <= 2009 ~ "2004-2009",
+        deathyear >= 2010 & deathyear <= 2015 ~ "2010-2015",
+        deathyear >= 2016 & deathyear <= 2021 ~ "2016-2021"
+    )) %>%
+    group_by(deathYearCat, agegroup) %>%
+    mutate(cvd_rate_grouped = sum(n) / sum(Population)) %>%
+    ungroup() 
+gen_2_grouped2 <- gen_2 %>%
+    mutate(deathYearCat = case_when(
+        deathyear >= 2004 & deathyear <= 2009 ~ "2004-2009",
+        deathyear >= 2010 & deathyear <= 2015 ~ "2010-2015",
+        deathyear >= 2016 & deathyear <= 2021 ~ "2016-2021"
+    )) %>%
+    group_by(deathYearCat, agegroup) %>%
+    summarise(cvd_rate_grouped = sum(n) / sum(Population)) 
+
+# By grouped year of death
+c2 <- lexpand(cancer_observed, status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = FollowUpStart, # Without those that did not meet follow-up
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
+             aggre = list(agegroup = age, deathYearCat))
+
+smr_deathYearCat <- sir(coh.data = c2, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2_grouped2, 
+                  ref.rate = 'cvd_rate_grouped', 
+                  adjust = c('deathYearCat', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print = c('deathYearCat', 'agegroup')); smr_deathYearCat
+#testing
+gen_2_grouped2[gen_2_grouped2$agegroup == 80,]
+c2[deathYearCat != "2022-2024" & agegroup == 80, ]
+
+smr_deathYearCat2 <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print ='deathyear'); smr_deathYearCat2
 # By year of diagnosis
 smr_diag <- sir(coh.data = c, coh.obs = 'from0to1', 
                   coh.pyrs = 'pyrs', 
@@ -272,18 +321,6 @@ smr_diagCat <- sir(coh.data = c, coh.obs = 'from0to1',
                   conf.level = 0.95,
                   print ='yearDiagCat'); smr_diagCat
 
-cat("SMR by age group")
-
-# By grouped year of death
-smr_deathYearCat <- sir(coh.data = c, coh.obs = 'from0to1', 
-                  coh.pyrs = 'pyrs', 
-                  ref.data = gen_2, 
-                  ref.rate = 'gen_cvd_rate', 
-                  adjust = c('deathyear', 'agegroup'), 
-                  test.type = "homogeneity",
-                  conf.type = "wald",
-                  conf.level = 0.95,
-                  print ='deathYearCat'); smr_deathYearCat
 
 cat("SMR by age group")
 
