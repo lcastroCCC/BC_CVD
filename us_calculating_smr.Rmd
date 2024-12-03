@@ -1,0 +1,872 @@
+---
+title: "2000 US SMR Calculations"
+output: html_document
+date: "`r format(Sys.time(), '%Y-%m-%d %I:%M:%S %p')`"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libraries, include = FALSE}
+
+library(readxl)
+library(dplyr)
+library(mgcv)
+library(ggplot2)
+library(openxlsx)
+library(popEpi)
+library(Epi)
+library(data.table)  
+library(lubridate)
+library(stringr)
+
+```
+
+```{r loading_gen_pop_rates, echo = FALSE}
+
+# Reading general population rates by age groups 0-59, 60-69, 70-79, 80+
+
+gen_2 <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/cvm_rate_gen_pop2.csv")
+}, error = function(e) {
+  read.csv("~/Downloads/NCHS/cvm_rate_gen_pop2.csv")
+}))
+
+```
+
+```{r loading_BC_rates, echo = FALSE}
+
+# Reading file grouped by year and age groups 0-59, 60-69, 70-79, 80+
+cvm_by_year_agegroup2 <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
+    mutate(Year = as.numeric(Year))
+}, error = function(e) {
+  read.csv("~/Downloads/Registro Central de Cancer/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
+    mutate(Year = as.numeric(Year))
+}))
+
+```
+
+```{r table_a, include = FALSE}
+
+table_a_2 <- left_join(gen_2, cvm_by_year_agegroup2, by = c("current_data_year" = "Year",
+                                                            "AgeDeathCat2" = "AgeGroup2")) %>%
+  select(current_data_year, AgeDeathCat2, n, Population, gen_cvd_rate, cvd_deaths_BC, PersonYears, cvd_rate) %>%
+  rename(gen_cvd_deaths = n,
+         gen_population = Population,
+         bc_cvd_deaths = cvd_deaths_BC,
+         bc_personyears = PersonYears,
+         bc_cvd_rate = cvd_rate ) %>%
+  mutate(bc_cvd_rate = round(bc_cvd_rate, 2),
+         gen_cvd_rate = round(gen_cvd_rate, 2)); table_a_2
+
+```
+
+```{r table_b, include = FALSE}
+
+table_b_2 <- table_a_2 %>%
+  select(current_data_year, AgeDeathCat2, bc_personyears, gen_cvd_rate, bc_cvd_deaths) %>%
+  mutate(expected_deaths = bc_personyears * (gen_cvd_rate / 1000)) %>%
+  relocate(expected_deaths, .before = bc_cvd_deaths); table_b_2
+
+summed_table_b_2 <- table_b_2 %>%
+    group_by(current_data_year) %>%
+    summarise(
+        bc_cvd_deaths = sum(bc_cvd_deaths, na.rm = TRUE),  # Sum of observed deaths
+        expected_deaths = sum(expected_deaths, na.rm = TRUE), # Sum of expected deaths
+        bc_personyears = sum(bc_personyears, na.rm = TRUE)         # Sum of person-time at risk
+    )
+  
+```
+
+```{r table_c, include = FALSE}
+
+table_c_2 <- data.frame(year = rep(summed_table_b_2$current_data_year, each = 2),
+             type_of_death = c("Observed", "Expected"),
+             number_of_deaths = unlist(mapply(c, summed_table_b_2$bc_cvd_deaths, summed_table_b_2$expected_deaths, SIMPLIFY = FALSE)),
+             person_time_at_risk = rep(summed_table_b_2$bc_personyears, each = 2)) %>%
+             mutate(rate_per_100py = number_of_deaths/ person_time_at_risk * 1000); table_c_2
+
+```
+
+```{r SMRs_by_year, include = FALSE}
+
+smrs_by_year <- table_c_2 %>%
+  group_by(year) %>%
+  summarise(
+    SMR = rate_per_100py[type_of_death == "Observed"] / rate_per_100py[type_of_death == "Expected"],
+    se = sqrt(number_of_deaths[type_of_death == "Observed"]) / 
+         number_of_deaths[type_of_death == "Expected"],
+    ci_low = round(SMR - (1.96 * se), 2),
+    ci_high = round(SMR + (1.96 * se), 2),
+    ConfidenceInterval = ifelse(!is.na(ci_low),
+                                paste0("(", ci_low, " - ", ci_high, ")"),
+                                NA),
+    p_value = 2 * pnorm(-abs((SMR - 1) / se))
+  ) %>%
+  mutate(
+    p_value = ifelse(is.na(p_value), NA, 
+                           ifelse(p_value < 0.001, "< 0.001", as.character(round(p_value, 4))))
+  ) %>%
+  select(-c(se, ci_low, ci_high)); smrs_by_year
+
+
+```
+
+```{r SMRs_by_age_group, include = FALSE}
+
+smrs_by_age <- table_b_2 %>%
+  group_by(AgeDeathCat2) %>%
+  summarise(
+    SMR = sum(bc_cvd_deaths, na.rm = TRUE) / sum(expected_deaths, na.rm = TRUE),
+    se = sqrt(sum(bc_cvd_deaths, na.rm = TRUE)) / sum(expected_deaths, na.rm = TRUE),
+    ci_low = round(SMR - (1.96 * se),2),
+ci_high = round(SMR + (1.96 * se),2),
+ConfidenceInterval = ifelse(!is.na(ci_low),
+                            paste0("(", ci_low, " - ", ci_high, ")"),
+                            NA),
+p_value = round(2 * pnorm(-abs((SMR - 1) / se)), 4),
+p_value = ifelse(p_value == 0,
+                 "< 0.001",
+                 p_value)) %>%
+  select( -c(se, ci_low,, ci_high)); smrs_by_age
+
+```
+
+```{r global_SMR, include = FALSE}
+
+smr_global <- table_c_2 %>%
+  group_by(type_of_death) %>%
+  summarise(total_deaths = sum(number_of_deaths, na.rm = TRUE),
+            total_person_time = sum(person_time_at_risk, na.rm = TRUE)) %>%
+  mutate(rate_per_1000py = total_deaths/ total_person_time * 1000) %>%
+  summarise(
+    SMR = rate_per_1000py[type_of_death == "Observed"] / rate_per_1000py[type_of_death == "Expected"],
+    se = sqrt(total_deaths[type_of_death == "Observed"]) / 
+         total_deaths[type_of_death == "Expected"],
+    ci_low = round(SMR - (1.96 * se),2),
+ci_high = round(SMR + (1.96 * se),2),
+ConfidenceInterval = ifelse(!is.na(ci_low),
+                            paste0("(", ci_low, " - ", ci_high, ")"),
+                            NA),
+p_value = round(2 * pnorm(-abs((SMR - 1) / se)), 4),
+p_value = ifelse(p_value == 0,
+                 "< 0.001",
+                 p_value)) %>%
+  select( -c(se, ci_low,, ci_high)); smr_global
+
+```
+
+```{r smr_with_function_prep, include = FALSE}
+
+# Population
+
+gen_2 <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/cvm_rate_gen_pop2.csv")
+}, error = function(e) {
+  read.csv("~/Downloads/NCHS/cvm_rate_gen_pop2.csv")
+}))
+gen_2 <- as.data.table(gen_2)
+setnames(gen_2, old = c("current_data_year", "AgeDeathCat2"), new = c("deathyear", "agegroup"))
+gen_2 <- gen_2[, .(agegroup, deathyear, n, Population, gen_cvd_rate)]
+gen_2[, agegroup := ifelse(agegroup == "80+", "80", 
+                                sub("([0-9]+)-([0-9]+)", "\\1", agegroup))]
+gen_2[, agegroup := as.numeric(agegroup)]
+gen_2[, gen_cvd_rate := gen_cvd_rate / 1000]
+
+
+# Cleansed cancer data
+
+cancer <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_cleansed.csv")
+}, error = function(e) {
+  read.csv("~/Downloads/Registro Central de Cancer/cancer_cleansed.csv")
+}, error = function(e) {
+  read.csv("~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_cleansed.csv")
+}))
+cancer <- cancer %>%
+  mutate(FollowUpStart = as.Date(FollowUpStart),
+         DiagnosisDate = as.Date(DiagnosisDate),
+         FollowUpEnd = as.Date(FollowUpEnd),
+         FollowUpEnd = if_else(month(FollowUpEnd) == 1 & day(FollowUpEnd) == 1,
+                        FollowUpEnd + days(1),  # If the date is January 1, add one day
+                        FollowUpEnd),
+         maritallabel = str_to_title(ifelse(maritallabel == "unknown",
+                               NA,
+                               maritallabel)),
+         Comorb.cat = factor(ifelse(Comorb == '0' , 'No', 
+                             ifelse(as.numeric(Comorb) >= 1, 'Yes', 'Unknown')),
+                             levels= c('Yes','No','Unknown')))
+
+cancer$yearDiagCat <- cut(cancer$ydiag, 
+                   breaks = c(2003, 2009, 2014, 2019), 
+                   labels = c("2004-2009", "2010-2014", "2015-2019"),
+                   right = TRUE)
+cancer$deathYearCat <- cut(cancer$yy_dlc, 
+                   breaks = c(2003, 2009, 2015, 2021, 2024), 
+                   labels = c("2004-2009", "2010-2015", "2016-2021", "2022-2024"),
+                   right = TRUE)
+
+cancer_observed <- cancer %>%
+  filter(FollowUpYears > 0)
+
+```
+
+```{r smr_with_follow_up, echo = FALSE, include = FALSE}
+
+cat("Global SMR")
+
+
+# This function splits case-level observations by calendar time (per), age, and follow-up time
+c <- lexpand(cancer_observed, status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = FollowUpStart, # Without those that did not meet follow-up
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
+             aggre = list(agegroup = age, deathyear = per, ydiag, yearDiagCat, deathYearCat, Comorb.cat, maritallabel))
+
+# Global SMR
+smr_global <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95); smr_global
+
+cat("SMR by year of death")
+
+# By year of death
+smr_year <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print ='deathyear'); smr_year
+
+cat("SMR by grouped year of death")
+
+gen_2_grouped <- gen_2 %>%
+    mutate(deathYearCat = case_when(
+        deathyear >= 2004 & deathyear <= 2009 ~ "2004-2009",
+        deathyear >= 2010 & deathyear <= 2015 ~ "2010-2015",
+        deathyear >= 2016 & deathyear <= 2021 ~ "2016-2021"
+    )) %>%
+    group_by(deathYearCat, agegroup) %>%
+    mutate(cvd_rate_grouped = sum(n) / sum(Population)) %>%
+    ungroup() 
+gen_2_grouped2 <- gen_2 %>%
+    mutate(deathYearCat = case_when(
+        deathyear >= 2004 & deathyear <= 2009 ~ "2004-2009",
+        deathyear >= 2010 & deathyear <= 2015 ~ "2010-2015",
+        deathyear >= 2016 & deathyear <= 2021 ~ "2016-2021"
+    )) %>%
+    group_by(deathYearCat, agegroup) %>%
+    summarise(cvd_rate_grouped = sum(n) / sum(Population)) 
+
+# By grouped year of death
+c2 <- lexpand(cancer_observed, status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = FollowUpStart, # Without those that did not meet follow-up
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
+             aggre = list(agegroup = age, deathYearCat))
+
+smr_deathYearCat <- sir(coh.data = c2, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2_grouped2, 
+                  ref.rate = 'cvd_rate_grouped', 
+                  adjust = c('deathYearCat', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print = c('deathYearCat', 'agegroup')); smr_deathYearCat
+#testing
+gen_2_grouped2[gen_2_grouped2$agegroup == 80,]
+c2[deathYearCat != "2022-2024" & agegroup == 80, ]
+
+smr_deathYearCat2 <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print ='deathyear'); smr_deathYearCat2
+# By year of diagnosis
+smr_diag <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "trend",
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print ='ydiag'); smr_diag
+
+cat("SMR by grouped year of diagnosis")
+
+# By grouped year of diagnosis
+smr_diagCat <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print ='yearDiagCat'); smr_diagCat
+
+
+cat("SMR by age group")
+
+# By age group
+smr_agegroup <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "homogeneity", # test for equal SMRs
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print ='agegroup'); smr_agegroup # print selects which var to visualise
+
+cat("SMR by comorbidity status. Filtering for Comorb status != Unknown and year of diagnosis >= 2010")
+
+# By comorbidity status
+comorb <- lexpand(cancer_observed[cancer_observed$ydiag >= 2010, ],
+                  status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = FollowUpStart, # Without those that did not meet follow-up
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
+             aggre = list(agegroup = age, deathyear = per, ydiag, Comorb.cat))
+
+smr_comorb <- sir(coh.data = comorb, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "homogeneity", # test for equal SMRs
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print ='Comorb.cat'); smr_comorb # print selects which var to visualise
+
+cat("SMR by marital status, filtering for marital status != Unknown")
+
+# By marital status
+smr_marital <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print ='maritallabel'); smr_marital
+
+
+cat("Extra for graphs: SMR by age group and death year")
+
+# By age group and year of death
+smr_facet <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "homogeneity", # test for equal SMRs
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print = c('deathyear', 'agegroup')); smr_facet # print selects which var to visualise
+```
+
+``` {r exporting_smrs, include = FALSE}
+
+# Create a new workbook
+wb <- createWorkbook()
+description <- "Adjusted by year at death and age group. Age groups were: 18-59, 60-69, 70-79, 80+. Wald confidence intervals, based on a Poisson regression model."
+
+# Function to add a worksheet with title and description
+addWorksheetWithDetails <- function(wb, sheetName, data, title, description) {
+  addWorksheet(wb, sheetName)
+  writeData(wb, sheet = sheetName, x = data, startRow = 3)  # Start writing data from row 3
+  writeData(wb, sheet = sheetName, x = title, startRow = 1, colNames = FALSE, rowNames = FALSE)
+  writeData(wb, sheet = sheetName, x = description, startRow = 2, colNames = FALSE, rowNames = FALSE)
+}
+
+# Add each data frame to a separate sheet with titles and descriptions
+addWorksheetWithDetails(wb, "Global SMR", smr_global, "Table 2. Global SMR", description)
+addWorksheetWithDetails(wb, "By age group", smr_agegroup, "Table 3. SMRs by Age Group", description)
+addWorksheetWithDetails(wb, "By year of diagnosis", smr_diag, "Table 4. SMRs by Year of Diagnosis", description)
+addWorksheetWithDetails(wb, "By year of death", smr_year, "Table 5. SMRs by Year of Death", description)
+addWorksheetWithDetails(wb, "By grouped year of diagnosis", smr_diagCat, "Table 6. SMRs by Grouped Year of Diagnosis", description)
+addWorksheetWithDetails(wb, "By marital status", smr_marital, "Table 7. SMRs by Marital Status", description)
+
+# Save the workbook
+saveWorkbook(wb, "~/Downloads/SMRs.xlsx", overwrite = TRUE)
+
+suppressWarnings(tryCatch({
+  saveWorkbook(wb, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/SMRs.xlsx", overwrite = TRUE)
+ }, error = function(e) {
+saveWorkbook(wb, "~/Downloads/SMRs.xlsx", overwrite = TRUE)
+ }))
+```
+
+```{r year_graphs, echo = FALSE, warning = FALSE}
+
+print("SMRs by year of diagnosis")
+
+smr_diag
+
+# Line graph by year of diagnosis
+ggplot(data = smr_diag, aes(x = ydiag, y = sir)) +
+  geom_line(color = "blue", size = 1.2) +  # Adjust line color and thickness
+  geom_point(size = 3, shape = 21, fill = "white", color = "blue") +  # Add points with fill
+  geom_ribbon(aes(ymin = sir.lo, ymax = sir.hi), fill = "lightblue", alpha = 0.3) +  # Confidence interval with fill color
+  geom_hline(yintercept = 1, color = "red", linetype = "dashed", size = 1) +  # Red dashed line at SMR = 1
+  xlab("Year of Diagnosis") +
+  ylab("Standardized Mortality Ratio (SMR)") +
+  scale_x_continuous(breaks = smr_diag$ydiag) +  # Add all year labels
+  scale_y_continuous(breaks = seq(1, max(smr_diag$sir.hi, na.rm = TRUE), by = 2), limits = c(1, NA)) +  # Breaks start at 1
+  theme_minimal(base_size = 14) +  # Use a minimal theme with larger font
+  theme(
+    axis.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  ) +
+  ggtitle("Standardized Mortality Ratio by Year of Diagnosis")
+
+
+print("SMRs by year of death")
+
+smr_year
+
+# Line graph by year of death
+ggplot(data = smr_year[-1, ], aes(x = deathyear, y = sir)) +
+  geom_line(color = "blue", size = 1.2) +  # Adjust line color and thickness
+  geom_point(size = 3, shape = 21, fill = "white", color = "blue") +  # Add points with fill
+  geom_ribbon(aes(ymin = sir.lo, ymax = sir.hi), fill = "lightblue", alpha = 0.3) +  # Confidence interval with fill color
+  geom_hline(yintercept = 1, color = "red", linetype = "dashed", size = 1) +  # Red dashed line at SMR = 1
+  xlab("Year of Death") +
+  ylab("Standardized Mortality Ratio (SMR)") +
+  scale_x_continuous(breaks = smr_year$deathyear) +  # Add all year labels
+  scale_y_continuous(breaks = seq(1, ceiling(max(smr_year[-1, ]$sir.hi, na.rm = TRUE)), by = 2), limits = c(0, NA)) +  # Breaks start at 1
+  theme_minimal(base_size = 14) +  # Use a minimal theme with larger font
+  theme(
+    axis.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  ) +
+  ggtitle("Standardized Mortality Ratio by Year of Death")
+
+
+print("SMRs by grouped year of death")
+
+smr_year
+
+smr_deathYearCat$deathYearCat <- factor(smr_deathYearCat$deathYearCat, 
+                                        levels = c("2004-2009", "2010-2015", "2016-2021"), 
+                                        ordered = TRUE)
+# Line graph by year of death
+ggplot(data = smr_deathYearCat, aes(x = deathYearCat, y = sir, group = 1)) +
+  geom_line(color = "blue", size = 1.2) +  # Adjust line color and thickness
+  geom_point(size = 3, shape = 21, fill = "white", color = "blue") +  # Add points with fill
+  geom_ribbon(aes(ymin = sir.lo, ymax = sir.hi), fill = "lightblue", alpha = 0.3) +  # Confidence interval with fill color
+  geom_hline(yintercept = 1, color = "red", linetype = "dashed", size = 1) +  # Red dashed line at SMR = 1
+  xlab("Year of Death") +
+  ylab("Standardized Mortality Ratio (SMR)") +
+  scale_x_discrete(limits = c("2004-2009", "2010-2015", "2016-2021"), expand = c(0.05, 0.05)) +  # Fix axis limits with no padding
+  scale_y_continuous(breaks = seq(1, ceiling(max(smr_deathYearCat$sir.hi, na.rm = TRUE))), limits = c(0, NA)) +  # Breaks start at 1
+  theme_minimal(base_size = 14) +  # Use a minimal theme with larger font
+  theme(
+    axis.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  ) +
+  ggtitle("Standardized Mortality Ratio by Grouped Year of Death")
+
+
+```
+
+```{r other_graphs, echo = FALSE}
+# Bar plot by age group
+smr_agegroup$agegroup <- factor(smr_agegroup$agegroup, 
+                                levels = c(18, 60, 70, 80), 
+                                labels = c("18-59", "60-69", "70-79", "80+"))
+
+ggplot(data = smr_agegroup, aes(x = agegroup, y = sir, fill = as.factor(agegroup))) +
+  geom_bar(stat = "identity", color = "black", width = 0.7) +  # Bar plot with black borders and custom width
+  geom_errorbar(aes(ymin = sir.lo, ymax = sir.hi), width = 0.2, color = "black") +  # Add error bars
+  xlab("Age Group") +
+  ylab("Standardized Mortality Ratio (SMR)") +
+  scale_fill_manual(values = c("#4E79A7", "#F28E2B", "#E15759", "#76B7B2")) +  # Professional color palette
+  theme_minimal(base_size = 14) +  # Minimal theme with larger font
+  theme(
+    axis.title = element_text(face = "bold"),
+    axis.text.x = element_text(hjust = 1),  # Rotate x-axis labels
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "none"  # Remove legend if not needed
+  ) +
+  ggtitle("Standardized Mortality Ratio by Age Group")
+
+# Horizontal SMRs by year of diagnosis
+ggplot(data = smr_diag, aes(x = sir, y = ydiag)) +
+  geom_point(size = 4, color = "#4E79A7") +  # Blue points for SMR
+  geom_errorbarh(aes(xmin = sir.lo, xmax = sir.hi), height = 0.2, color = "black") +  # Horizontal error bars
+  geom_vline(xintercept = 1, linetype = "dashed", color = "red", size = 1) +  # Reference line at SMR = 1
+  xlab("Standardized Mortality Ratio (SMR)") +
+  scale_y_continuous(breaks = smr_diag$ydiag) +  # Add all year labels
+  scale_x_continuous(breaks = seq(1, max(smr_diag$sir.hi, na.rm = TRUE), by = 2), limits = c(1, NA)) +  # Breaks start at 1
+  ylab("Age Group") +
+  theme_minimal(base_size = 14) +  # Minimal theme
+  theme(
+    axis.title = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold"),  # Bold y-axis labels
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  ) +
+  ggtitle("Standardized Mortality Ratio by Year of Diagnosis")
+
+print("This next graph is probably not a good choice. Shown just so we know")
+
+# Horizontal SMRs by year of diagnosis and agegroup
+ggplot(data = smr_facet, aes(x = sir, y = deathyear)) +
+  facet_wrap(~agegroup) +
+  geom_point(size = 2, color = "#4E79A7") +  # Blue points for SMR
+  geom_errorbarh(aes(xmin = sir.lo, xmax = sir.hi), height = 0.2, color = "black") +  # Horizontal error bars
+  geom_vline(xintercept = 1, linetype = "dashed", color = "red", size = 1) +  # Reference line at SMR = 1
+  xlab("Standardized Mortality Ratio (SMR)") +
+  scale_y_continuous(breaks = smr_facet$deathyear) +  # Add all year labels
+ # scale_x_continuous(breaks = seq(1, max(smr_facet$sir.hi, na.rm = TRUE), by = 2), limits = c(1, NA)) +  # Breaks start at 1
+  ylab("Age Group") +
+  theme_minimal(base_size = 14) +  # Minimal theme
+  theme(
+    axis.title = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold"),  # Bold y-axis labels
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  ) +
+  ggtitle("Standardized Mortality Ratio by Year of Death and Age Group")
+
+# Horizontal SMRs by age group
+ggplot(data = smr_agegroup, aes(x = sir, y = agegroup)) +
+  geom_point(size = 4, color = "#4E79A7") +  # Blue points for SMR
+  geom_errorbarh(aes(xmin = sir.lo, xmax = sir.hi), height = 0.2, color = "black") +  # Horizontal error bars
+  geom_vline(xintercept = 1, linetype = "dashed", color = "red", size = 1) +  # Reference line at SMR = 1
+  xlab("Standardized Mortality Ratio (SMR)") +
+  ylab("Age Group") +
+  theme_minimal(base_size = 14) +  # Minimal theme
+  theme(
+    axis.title = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold"),  # Bold y-axis labels
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  ) +
+  ggtitle("Standardized Mortality Ratio by Age Group")
+
+# Horizontal SMRs by grouped year of diagnosis
+ggplot(data = smr_deathYearCat, aes(x = sir, y = deathYearCat)) +
+  geom_point(size = 4, color = "#4E79A7") +  # Blue points for SMR
+  geom_errorbarh(aes(xmin = sir.lo, xmax = sir.hi), height = 0.2, color = "black") +  # Horizontal error bars
+  geom_vline(xintercept = 1, linetype = "dashed", color = "red", size = 1) +  # Reference line at SMR = 1
+  xlab("Standardized Mortality Ratio (SMR)") +
+  ylab("Year of Death") +
+  theme_minimal(base_size = 14) +  # Minimal theme
+  theme(
+    axis.title = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold"),  # Bold y-axis labels
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  ) +
+  ggtitle("Standardized Mortality Ratio by Year of Death")
+
+```
+
+```{r imputation_sensitivity, include = FALSE}
+
+# Without imputation
+
+# old_cancer <- suppressWarnings(tryCatch({
+#   read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/old_cancer_cleansed.csv")
+# }, error = function(e) {
+#   read.csv("~/Downloads/Registro Central de Cancer/old_cancer_cleansed.csv")
+# }, error = function(e) {
+#   read.csv("~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/old_cancer_cleansed.csv")
+# }))
+# old_cancer <- old_cancer %>%
+#   mutate(FollowUpStart = as.Date(FollowUpStart),
+#          DiagnosisDate = as.Date(DiagnosisDate),
+#          FollowUpEnd = as.Date(FollowUpEnd),
+#          FollowUpEnd = if_else(month(FollowUpEnd) == 1 & day(FollowUpEnd) == 1,
+#                         FollowUpEnd + days(1),  # If the date is January 1, add one day
+#                         FollowUpEnd),
+#          maritallabel = ifelse(maritallabel == "unknown",
+#                                NA,
+#                                maritallabel))
+# old_cancer_observed <- old_cancer %>%
+#   filter(FollowUpYears > 0)
+# 
+# 
+# old_c <- lexpand(old_cancer_observed, status = cvdStatus != 0, 
+#              birth = birth_date,
+#              entry = FollowUpStart, # Without those that did not meet follow-up
+#              exit = FollowUpEnd, 
+#              breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
+#              aggre = list(agegroup = age, deathyear = per))
+# 
+# old_smr <- sir(coh.data = old_c, coh.obs = 'from0to1', 
+#                   coh.pyrs = 'pyrs', 
+#                   ref.data = gen_2, 
+#                   ref.rate = 'gen_cvd_rate', 
+#                   adjust = c('deathyear', 'agegroup'), 
+#                   test.type = "homogeneity",
+#                   conf.type = "wald",
+#                   conf.level = 0.95); old_smr
+# # With imputation
+# 
+# smr_global # From chunk smr_with_follow_up
+# 
+# 
+# # Graph
+# results <- data.frame(
+#   Dataset = c("Original", "Imputed"),
+#   SMR = c(old_smr$sir, smr_global$sir),
+#   LowerCI = c(old_smr$sir.lo, smr_global$sir.lo),
+#   UpperCI = c(old_smr$sir.hi, smr_global$sir.hi))
+# 
+# ggplot(results, aes(x = Dataset, y = SMR)) +
+#   geom_point() +
+#   geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI)) +
+#   geom_text(aes(label = round(SMR, 2), vjust = 0.2, hjust = -0.5), size = 4) +
+#   ylab("Standardized Mortality Ratio (SMR)") +
+#   theme_minimal()
+
+```
+
+```{r smr_from_start, include = FALSE}
+# 
+# # This function splits case-level observations by calendar time (per), age, and follow-up time
+# c <- lexpand(cancer, status = cvdStatus != 0, 
+#              birth = birth_date,
+#              entry = DiagnosisDate, # From diagnosis
+#              exit = FollowUpEnd, 
+#              breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
+#              aggre = list(agegroup = age, year = per))
+# 
+# # Showing years, adjusted by year of death and age group
+# smr_year <- sir(coh.data = c, coh.obs = 'from0to1', 
+#                   coh.pyrs = 'pyrs', 
+#                   ref.data = gen_2, 
+#                   ref.rate = 'gen_cvd_rate', 
+#                   adjust = c('year', 'agegroup'), 
+#                   test.type = "homogeneity",
+#                   conf.type = "wald",
+#                   conf.level = 0.95,
+#                   print ='year'); smr_year
+# 
+# #Showing age groups, adjusted by year of death and age group
+# smr_agegroup <- sir(coh.data = c, coh.obs = 'from0to1', 
+#                   coh.pyrs = 'pyrs', 
+#                   ref.data = gen_2, 
+#                   ref.rate = 'gen_cvd_rate', 
+#                   adjust = c('year', 'agegroup'), 
+#                   test.type = "homogeneity", # test for equal SMRs
+#                   conf.type = "wald",
+#                   conf.level = 0.95,
+#                   print ='agegroup'); smr_agegroup # print selects which var to visualise
+# 
+# 
+# # This function splits case-level observations by calendar time (per), age, and follow-up time
+# c2 <- lexpand(cancer[ !is.na(cancer$maritallabel), ], status = cvdStatus != 0, 
+#              birth = birth_date,
+#              entry = DiagnosisDate, # From diagnosis
+#              exit = FollowUpEnd, 
+#              breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
+#              aggre = list(agegroup = age, year = per, maritallabel))
+# 
+# # Showing years, adjusted by year of death and age group
+# smr_marital <- sir(coh.data = c2, coh.obs = 'from0to1', 
+#                   coh.pyrs = 'pyrs', 
+#                   ref.data = gen_2, 
+#                   ref.rate = 'gen_cvd_rate', 
+#                   adjust = c('year', 'agegroup'), 
+#                   test.type = "homogeneity",
+#                   conf.type = "wald",
+#                   conf.level = 0.95,
+#                   print ='maritallabel'); smr_marital
+# 
+# # Bar plot for marital status SMRs
+# 
+# ggplot(smr_marital, aes(x = maritallabel, y = sir)) + 
+#   geom_bar(stat = "identity", fill = "skyblue") +
+#   geom_errorbar(aes(ymin = sir.lo, ymax = sir.hi), width = 0.2) +
+#   labs(title = "Summary Measure of Marital Status", x = "Group", y = "Rate") +
+#   theme_minimal()
+
+```
+
+```{r age_year_regression, include = FALSE}
+
+# Filter the data to remove rows with NA in any of the relevant columns
+filtered_data <- table_b_2[!is.na(table_b_2$current_data_year) & 
+                            !is.na(table_b_2$bc_cvd_deaths) & 
+                            !is.na(table_b_2$expected_deaths), ]
+filtered_data$AgeDeathCat2 <- factor(filtered_data$AgeDeathCat2, 
+                                     levels = rev(levels(factor(filtered_data$AgeDeathCat2))))
+# To have in mind:
+
+filtered_data %>% group_by(AgeDeathCat2) %>% summarise(var = sum(bc_cvd_deaths)/ sum(expected_deaths))
+
+# Fit a Poisson regression model
+regression <- glm(bc_cvd_deaths ~ current_data_year + AgeDeathCat2, 
+                  offset = log(expected_deaths),
+                  family = poisson, 
+                  data = filtered_data)
+
+
+# Summarize the model
+summary(regression)
+
+exp(summary(regression)$coefficients[, "Estimate"]) # For each additional year, the risk of death from breast cancer cardiovascular disease increases by approximately 12%. This suggests a positive trend in mortality over time.
+
+# Group 70 - 79's SMR is 89% higher than for reference
+# Group 60 - 69's SMR is 138% higher than for reference
+# Group 18 - 59's SMR is 517% higher than for reference
+
+# All else being equal (population sizes, year of diagnosis)
+
+# The model results suggest that even though older women (80+) may have a higher absolute number of CVD deaths, their rate relative to what is expected based on their population characteristics indicates a different risk pattern. The younger age group shows a more significant contrast in CVD death rates relative to expected deaths, highlighting potential disparities in mortality risk that merit further investigation.
+
+# There is an increasing trend in SMR over the years.
+# Younger age groups (especially those aged 18-59) have significantly higher SMRs compared to older age groups.
+
+summary(regression)$coefficients[, "Pr(>|z|)"] # There is very strong evidence that mortality increases with time.
+
+summary(regression)$deviance # The residual deviance of 219.81 indicates that there is still some variability in the data not explained by the model, but the deviance has been substantially reduced from the null deviance of 307.49.
+```
+
+```{r modeling_age_year_regression, include = FALSE}
+
+# Create a data frame for plotting
+# Create the plot data frame
+# plot_data <- data.frame(
+#   current_data_year = filtered_data$current_data_year,
+#   observed_deaths = filtered_data$bc_cvd_deaths,
+#   expected_deaths = filtered_data$expected_deaths,
+#   fitted_values = predict(regression, newdata = filtered_data, type = "response")
+# )
+# 
+# # Calculate confidence intervals for the fitted values
+# # You can use the `predict()` function with se.fit = TRUE
+# fit <- predict(regression, type = "link", se.fit = TRUE)
+# 
+# # Back-transform to response scale (using the link function)
+# fit_response <- exp(fit$fit)
+# fit_se <- exp(fit$fit + qnorm(0.975) * fit$se.fit)  # Upper CI
+# fit_se_lower <- exp(fit$fit - qnorm(0.975) * fit$se.fit)  # Lower CI
+# 
+# # Add fitted values and confidence intervals to the data frame
+# plot_data <- cbind(plot_data,
+#                    lower_ci = fit_se_lower,
+#                    upper_ci = fit_se)
+# 
+# # Create the plot
+# ggplot() +
+#   geom_point(data = filtered_data, aes(x = current_data_year, y = bc_cvd_deaths, color = AgeDeathCat2), 
+#              size = 3, shape = 16, alpha = 0.7) + 
+#   geom_line(data = filtered_data, aes(x = current_data_year, y = fitted_values, color = AgeDeathCat2), size = 1) +
+#   geom_ribbon(data = filtered_data, aes(x = current_data_year, ymin = lower_ci, ymax = upper_ci, fill = AgeDeathCat2), alpha = 0.2) +
+#   labs(title = "Poisson Regression Model for CVD Deaths by Age Group",
+#        x = "Year of Diagnosis",
+#        y = "Number of Deaths") +
+#   theme_minimal() +
+#   scale_color_brewer(palette = "Set1") +  # Use a color palette for better visibility
+#   scale_fill_brewer(palette = "Set1")  # Fill for the ribbon
+
+
+```
+
+```{r archive, include = FALSE}
+
+
+# while this seems okay, table C seems to be a total sum of age groups  
+# table_c_1 <- table_b_1 %>%
+#   group_by(current_data_year) %>%
+#   mutate(Type = c(sum(bc_cvd_deaths), expected_deaths = sum(expected_deaths)),
+#             bc_personyears = sum(bc_personyears)) %>%
+#   mutate(person_time_at_risk = bc_personyears, 
+#          rate_per_1000py = observed_deaths/ bc_personyears * 1000); table_c_1
+#   select(expected_deaths, bc_personyears) %>%
+#   mutate(expected_rate = expected_deaths / bc_personyears * 1000); table_c_1
+
+# tables_c_1 <- table_a_1 %>%
+#   select(current_data_year, AgeDeathCat, bc_personyears, gen_cvd_rate, bc_cvd_deaths, bc_cvd_rate) %>%
+#   mutate(expected_rate = round(bc_personyears*gen_cvd_rate, 2)/ 1000) %>%
+#   rename(observed_rate = bc_cvd_rate) %>%
+#   mutate(observed_rate = round(observed_rate, 2)); tables_c_1
+# 
+# smr_years_1 <- tables_c_1 %>%
+#   select(current_data_year, AgeDeathCat, observed_rate, expected_rate) %>%
+#   mutate(smr = observed_rate/expected_rate); smr_years_1
+
+
+# table_a_1 %>%
+#   summarise(bc_cvd_deaths = sum(bc_cvd_deaths, na.rm = TRUE), bc_personyears = sum(bc_personyears, na.rm = TRUE),
+#             gen_cvd_deaths = sum(gen_cvd_deaths, na.rm = TRUE), gen_personyears = sum(gen_population, na.rm = TRUE)) %>%
+#   mutate(gen_cvd_rate = (gen_cvd_deaths/ gen_personyears) * 1000,
+#          bc_cvd_rate = (bc_cvd_deaths/ bc_personyears) * 1000,
+#          expected_rate = round((bc_personyears * gen_cvd_rate) / 1000,2),
+#          smr = bc_cvd_rate/ expected_rate)
+#   
+# data.frame(Type = c("Observed", "Expected"),
+#            Number of deaths = c())
+
+
+```
+
+```{r age_group_1, include = FALSE}
+
+# Reading general population rates by age groups 0-59, 60+
+# 
+# gen_1 <- suppressWarnings(tryCatch({
+#   read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/cvm_rate_gen_pop1.csv")
+# }, error = function(e) {
+#   read.csv("~/Downloads/NCHS/cvm_rate_gen_pop1.csv")
+# }))
+# 
+# # Reading file grouped by year and age groups 0-59, 60+
+# cvm_by_year_agegroup1 <- suppressWarnings(tryCatch({
+#   read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cáncer/Data/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
+#     mutate(Year = as.numeric(Year))
+# }, error = function(e) {
+#   read.csv("~/Downloads/Registro Central de Cáncer/cvm_by_year_agegroup1.csv", row.names = NULL) %>%
+#     mutate(Year = as.numeric(Year))
+# }))
+# 
+# gen_1 <- gen_1 %>% filter(current_data_year == 2006)
+# 
+# table_a_1 <- left_join(gen_1, cvm_by_year_agegroup1, by = c("current_data_year" = "Year",
+#                                                             "AgeDeathCat" = "AgeGroup")) %>%
+#   select(current_data_year, AgeDeathCat, n, Population, gen_cvd_rate, cvd_deaths_BC, PersonYears, cvd_rate) %>%
+#   rename(gen_cvd_deaths = n,
+#          gen_population = Population,
+#          bc_cvd_deaths = cvd_deaths_BC,
+#          bc_personyears = PersonYears,
+#          bc_cvd_rate = cvd_rate ) %>%
+#   mutate(bc_cvd_rate = round(bc_cvd_rate, 2),
+#          gen_cvd_rate = round(gen_cvd_rate, 2))
+# 
+# table_b_1 <- table_a_1 %>%
+#   select(current_data_year, AgeDeathCat, bc_personyears, gen_cvd_rate, bc_cvd_deaths) %>%
+#   mutate(expected_deaths = bc_personyears * (gen_cvd_rate / 1000)) %>%
+#   relocate(expected_deaths, .before = bc_cvd_deaths)
+# 
+# table_c_1 <- data.frame(year = 2006,
+#              type = c("Observed", "Expected"),
+#              number_of_deaths = c(sum(table_b_1$bc_cvd_deaths), sum(table_b_1$expected_deaths)),
+#              person_time_at_risk = sum(table_b_1$bc_personyears)) %>%
+#              mutate(rate_per_100py = number_of_deaths/ person_time_at_risk * 1000)
+# 
+# SMR1 <- table_c_1$rate_per_100py[1]/ table_c_1$rate_per_100py[2]
+
+```
