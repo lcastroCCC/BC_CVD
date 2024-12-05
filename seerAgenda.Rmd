@@ -1,0 +1,93 @@
+---
+title: "CVD mortality in BC survivors analysis"
+author: "Carola Sánchez-Díaz, PhD"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+Agenda
+
+- COD variable
+- CVD, BC, other causes of death? 
+- Dichotomous recode or merged variable for treatments
+- MP classification
+- Puerto Rico data for MP-SMR
+- Case-listing?
+- Time before follow-up
+ 
+
+**Puerto Rico Central Cancer Registry extract for BC survivors women 18+ diagnosed 2004-2019**
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+# Loading packages
+library(readxl)
+library(gtsummary)
+library(tidyverse)
+library(lubridate)
+library(skimr)
+
+# Paths
+paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_registry_20240924.csv",
+           "~/Downloads/Registro Central de Cancer/cancer_registry_20240924.csv",
+           paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_registry_20240924.csv"))
+
+# Attempt to read the file
+cancer.raw <- suppressWarnings(tryCatch({
+  read.csv(paths[1])
+}, error = function(e) {
+  read.csv(paths[2])
+}, error = function(e) {
+  read.csv(paths[3])
+}))
+
+cancer <- cancer.raw %>% 
+  mutate(AgeDx = as.numeric(cancer.raw$AgeDx),
+         AgeDx = ifelse(AgeDx == 999, NA, AgeDx),
+         birth_date = ydiag - AgeDx,
+         AgeFollowUpStart = AgeDx + 1,   
+         AgeDeath = ifelse(VitalStatus == 0,
+                           AgeDx + (yy_dlc - ydiag), NA),
+         mm_dx = ifelse(is.na(mm_dx), 6, mm_dx),
+         mm_dlc = ifelse(is.na(mm_dlc), 6, mm_dlc),
+         DiagnosisDate = make_date(year = ydiag, month = mm_dx, day = 1),
+         FollowUpStart = DiagnosisDate %m+% years(1),
+         FollowUpEnd = make_date(year = yy_dlc, month = mm_dlc, day = 1),
+         FollowUpYears = as.numeric(difftime(FollowUpEnd, FollowUpStart, units = "days")) / 365.25,
+         AgeDeathCat = as.factor(case_when(AgeDeath < 60 ~ "18-59",
+                                           AgeDeath >= 60 ~ "60+",
+                                           TRUE ~ NA)),
+         AgeDeathCat2 = as.factor(case_when(AgeDeath >= 18 & AgeDeath <= 59 ~ "18-59",
+                                            AgeDeath >= 60 & AgeDeath <= 69 ~ "60-69",
+                                            AgeDeath >= 70 & AgeDeath <= 79 ~ "70-79",
+                                            AgeDeath >= 80 ~ "80+",
+                                            TRUE ~ NA)),
+         cvdStatus = ifelse(VitalStatus == 0 & CVDDeathCause == "CVD death", 1, 0),
+         Vital = as.factor(ifelse(VitalStatus == 0 & CVDDeathCause == 'CVD death','CVD death',
+                                  ifelse(VitalStatus == 0 & BCDeathCause == 'BC death', 'BC death',
+                                         ifelse(VitalStatus == 0, 'Other Death', 'Alive'
+                                         )))),
+         SurvivalTime = ifelse(VitalStatus == 1, NA,
+                               ifelse(VitalStatus == 0 & FollowUpYears > 0,
+                                      FollowUpYears, 0)),
+         DxCity = str_to_title(DxCity),
+         EncryptedID = as.factor(EncryptedID),
+        cvdStatus = as.factor(cvdStatus),
+        Comorb = as.factor(Comorb)) %>%
+   dplyr::select(EncryptedID,
+          mm_dx, ydiag, DiagnosisDate, FollowUpStart, AgeDx, birth_date, AgeFollowUpStart, 
+          mm_dlc, yy_dlc, FollowUpEnd, FollowUpYears, AgeDeath, FollowUpYears,
+          AgeDeathCat, AgeDeathCat2, Vital, cvdStatus, SurvivalTime, maritallabel, Surgery, Radiotherapy, Chemotherapy,
+          Comorb, DxCounty, DxCity, HealthRegion)
+
+
+cancer_observed <- cancer %>%
+  filter(FollowUpYears > 0) 
+
+cvd_specific <- cancer_observed %>%
+  filter(Vital == "CVD death")
+
+skim(cancer_observed)
+
+```
+
