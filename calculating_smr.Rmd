@@ -427,6 +427,7 @@ ggplot(data = smr_diag, aes(x = ydiag, y = sir)) +
   geom_line(color = "blue", size = 1.2) +  # Adjust line color and thickness
   geom_point(size = 3, shape = 21, fill = "white", color = "blue") +  # Add points with fill
   geom_ribbon(aes(ymin = sir.lo, ymax = sir.hi), fill = "lightblue", alpha = 0.3) +  # Confidence interval with fill color
+  geom_text(aes(label = round(sir, 2)), nudge_y = 0.4, nudge_x = -0.15, size = 4, color = "blue") +  # Add labels with a slight upward offset
   geom_hline(yintercept = 1, color = "red", linetype = "dashed", size = 1) +  # Red dashed line at SMR = 1
   xlab("Year of Diagnosis") +
   ylab("Standardized Mortality Ratio (SMR)") +

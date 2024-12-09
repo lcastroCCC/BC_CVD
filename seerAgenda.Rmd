@@ -30,7 +30,8 @@ library(skimr)
 # Paths
 paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_registry_20240924.csv",
            "~/Downloads/Registro Central de Cancer/cancer_registry_20240924.csv",
-           paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_registry_20240924.csv"))
+           paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_registry_20240924.csv",
+                  "~/Downloads/Registro Central de Cancer/cancer_registry_20240924.csv"))
 
 # Attempt to read the file
 cancer.raw <- suppressWarnings(tryCatch({

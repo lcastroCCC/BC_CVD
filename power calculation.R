@@ -1,16 +1,6 @@
-library(pwrss)
 
 #Féminas con cáncer de seno  = 1489
 #Población de féminas sin cáncer del seno = 21,149
-
-# Calculating either sample size or power for logistic regression
-pwrss.z.logreg(r2.other.x = 0.10,
-               n = 200, alpha = 0.05, 
-               dist = "bernoulli")
-
-pwrss.z.logreg(p1 = 0.20, p0 = 0.14, r2.other.x = 0.10,
-               n = 200, alpha = 0.05, 
-               dist = "bernoulli")
 
 # p1 = probability of being in group 1
 
@@ -19,31 +9,64 @@ pwrss.z.logreg(p1 = 0.20, p0 = 0.14, r2.other.x = 0.10,
 
 # r2.other.x = squared multiple correlation of 0.20 between 𝑋1 and other covariates
 
-# dist = distribution of the predictor variable.
+# dist = distribution of the predictor x variable.
 # Default parameters are:
 #distribution = list(dist = "normal", mean = 0, sd = 1)
 #distribution = list(dist = "poisson", lambda = 1)
 
-#pwr.f2.test
-# package WebPower wp.logistic
-library(WebPower)
-??wb.logistic
+# Inputs
+nSizes <- c(200, 250, 300)
+p0 <- 0.705
+p1 <- 0.80
+r2 <- 0.10
+alpha <- 0.05
 
-power <- wp.logistic(n = c(200, 250), p0=0.1, p1=0.15, alpha=0.05, alternative="two.sided", family="normal"); power
+
+# Package pwrss -------------------------------------------------------------
+library(pwrss)
+
+power <- pwrss.z.logreg(p1 = p1, p0 = p0, r2.other.x = r2,
+               n = nSizes, alpha = alpha, 
+               dist = "normal", alternative = "not equal"); power
+plot(power)
+
+# Calculating a sample size instead
+sample <- pwrss.z.logreg(p1 = 0.75, p0 = p0, r2.other.x = r2,
+               power = 0.80, alpha = alpha, 
+               dist = "normal", alternative = "not equal"); sample
+plot(sample)
+#pwrss.z.logreg(p0 = p0, odds.ratio = 1.18, r2.other.x = r2,sample()#pwrss.z.logreg(p0 = p0, odds.ratio = 1.18, r2.other.x = r2,
+#               n = nSizes, alpha = alpha, 
+#               dist = "normal")
+
+# Package WebPower -------------------------------------------------------------
+library(WebPower)
+
+power <- wp.logistic(n = nSizes, p0 = p0, p1 = p1, alpha = alpha, alternative="two.sided", family="normal"); power
+plot(power)
+
+
+# Package pwr -------------------------------------------------------------
+library(pwr)
 
 # pwr is for linear models though
-# Install and load the pwr package
-#library(pwr)
-
-# Parameters
-#n <- 200                    # Total sample size
-#r2 <- 0.10                  # Proportion of variance explained by predictors
-#alpha <- 0.05               # Significance level
-#k <- 1                      # Number of predictors (cardiotoxic treatment)
+k <- 8                      # Number of predictors (cardiotoxic treatment)
 
 # Calculate f2
-#f2 <- r2 / (1 - r2)
+f2 <- r2 / (1 - r2)
 
-# Power calculation
-#power_result <- pwr.f2.test(u = k, v = n - k - 1, f2 = f2, sig.level = alpha)
-#power_result
+power_result <- pwr.f2.test(u = k, v = nSizes - k - 1, f2 = f2, sig.level = alpha)
+power_result
+
+# Aim 3 -------------------------------------------------------------------
+
+# Estimates from:
+# https://pmc.ncbi.nlm.nih.gov/articles/PMC7218836/pdf/12911_2020_Article_1127.pdf
+# These proportions are of CHD diagnosis given less than ideal CVH. With and without cardiotoxic treatment
+
+p1 = 0.759
+p0 = 0.559
+
+pwrss.z.logreg(p1 = p1, p0 = p0, r2.other.x = r2,
+                         power = 0.80, alpha = alpha, 
+                         dist = "normal", alternative = "not equal")
