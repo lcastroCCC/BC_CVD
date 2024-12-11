@@ -1,6 +1,7 @@
+# Libraries
 
-#Féminas con cáncer de seno  = 1489
-#Población de féminas sin cáncer del seno = 21,149
+library(pwr)
+library(pwrss)
 
 # p1 = probability of being in group 1
 
@@ -16,57 +17,81 @@
 
 # Inputs
 nSizes <- c(200, 250, 300)
-p0 <- 0.705
-p1 <- 0.80
-r2 <- 0.10
+r2 <- 0.10 # standard R^2
 alpha <- 0.05
 
+# Aim 1 - Qualitative interviews -----------------------------------------------
 
-# Package pwrss -------------------------------------------------------------
-library(pwrss)
+n <- 12 # these many people will have an in depth interview prior to exploring other aims
 
-power <- pwrss.z.logreg(p1 = p1, p0 = p0, r2.other.x = r2,
-               n = nSizes, alpha = alpha, 
-               dist = "normal", alternative = "not equal"); power
-plot(power)
+# Aim 2 - Prevalence study -----------------------------------------------------
 
-# Calculating a sample size instead
-sample <- pwrss.z.logreg(p1 = 0.75, p0 = p0, r2.other.x = r2,
-               power = 0.80, alpha = alpha, 
-               dist = "normal", alternative = "not equal"); sample
-plot(sample)
-#pwrss.z.logreg(p0 = p0, odds.ratio = 1.18, r2.other.x = r2,sample()#pwrss.z.logreg(p0 = p0, odds.ratio = 1.18, r2.other.x = r2,
-#               n = nSizes, alpha = alpha, 
-#               dist = "normal")
+# How large must a sample be to estimate a proportion?
+# Source: Daniel, W. W., & Cross, C. L. (2013). Biostatistics: a foundation for analysis in the health sciences. Tenth edition
 
-# Package WebPower -------------------------------------------------------------
-library(WebPower)
+se <- 2/1.96
+n <- 15*(100-15)/(se^2)
+N <- 1489        # Population size
+p <- 0.15         # Expected prevalence
+E <- 0.05        # Margin of error
+z <- 1.96        # Z-score for 95% confidence
+attrition <- .20 # Dropout or loss to follow-up
 
-power <- wp.logistic(n = nSizes, p0 = p0, p1 = p1, alpha = alpha, alternative="two.sided", family="normal"); power
-plot(power)
+# Initial sample size (n0)
+n0 <- (z^2 * p * (1 - p)) / E^2
 
+# Adjusted sample size with finite population correction
+n <- (N * z^2 * p * (1-p))/ (E^2 * (N - 1) + z^2 * p * (1-p)); n
 
-# Package pwr -------------------------------------------------------------
-library(pwr)
+# Adjust for attrition
+n_adjusted <- n / (1 - attrition); n_adjusted
 
-# pwr is for linear models though
-k <- 8                      # Number of predictors (cardiotoxic treatment)
+# Error for proportions
 
-# Calculate f2
-f2 <- r2 / (1 - r2)
+# Standard Error with Finite Population Correction
+SEp <- sqrt((p * (1 - p)) / n_adjusted) * sqrt((N - n_adjusted) / (N - 1))
 
-power_result <- pwr.f2.test(u = k, v = nSizes - k - 1, f2 = f2, sig.level = alpha)
-power_result
+# Margin of Error
+ME <- z * SEp; ME
 
-# Aim 3 -------------------------------------------------------------------
+# Output results
+cat("Standard Error (with FPC):", round(SEp, 4), "\n")
+cat("Margin of Error (95% CI):", round(ME, 4), "\n")
 
-# Estimates from:
+# Error for means
+
+# Standard Error
+sqrt(1/(n_adjusted-1)) * sum()
+
+# Aim 3 - Treatments comparison in EHR data ------------------------------------
+
+# Estimates p1 and p0 from:
 # https://pmc.ncbi.nlm.nih.gov/articles/PMC7218836/pdf/12911_2020_Article_1127.pdf
 # These proportions are of CHD diagnosis given less than ideal CVH. With and without cardiotoxic treatment
 
-p1 = 0.759
-p0 = 0.559
+p1 <- 0.759
+p0 <- 0.559
 
-pwrss.z.logreg(p1 = p1, p0 = p0, r2.other.x = r2,
-                         power = 0.80, alpha = alpha, 
-                         dist = "normal", alternative = "not equal")
+# For power analysis
+
+pwrss.z.logreg(p1, p0, r2.other.x = r2,
+               n = N, alpha = alpha, 
+               dist = "normal", alternative = "not equal")
+
+# For sample size calculation
+
+pwrss.z.logreg(p1, p0, r2.other.x = r2,
+               power = .80, alpha = alpha, 
+               dist = "normal", alternative = "not equal")
+
+
+# Using pwr package - power calculation for general linear model
+f2 <- r2 / (1 - r2)
+predictors <- 9  # Number of predictors (including cardiotoxic treatment and life's essential 8)
+
+pwrtest <- pwr.f2.test(u = predictors, f2 = f2, sig.level = alpha, power = power)
+n <- pwrtest$v + pwrtest$u + 1; n
+
+power_result <- pwr.f2.test(u = predictors, v = nSizes - k - 1, f2 = f2, sig.level = alpha)
+power_result
+
