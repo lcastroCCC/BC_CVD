@@ -65,6 +65,8 @@ sqrt(1/(n_adjusted-1)) * sum()
 
 # Aim 3 - Treatments comparison in EHR data ------------------------------------
 
+# Aim 3 - Treatments comparison in EHR data ------------------------------------
+
 # Estimates p1 and p0 from:
 # https://pmc.ncbi.nlm.nih.gov/articles/PMC7218836/pdf/12911_2020_Article_1127.pdf
 # These proportions are of CHD diagnosis given less than ideal CVH. With and without cardiotoxic treatment
@@ -94,4 +96,3 @@ n <- pwrtest$v + pwrtest$u + 1; n
 
 power_result <- pwr.f2.test(u = predictors, v = nSizes - k - 1, f2 = f2, sig.level = alpha)
 power_result
-
