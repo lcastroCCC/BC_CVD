@@ -26,6 +26,7 @@ n <- 12 # these many people will have an in depth interview prior to exploring o
 
 # Aim 2 - Prevalence study -----------------------------------------------------
 
+# HER2 source: https://heart.bmj.com/content/110/9/650
 # How large must a sample be to estimate a proportion?
 # Source: Daniel, W. W., & Cross, C. L. (2013). Biostatistics: a foundation for analysis in the health sciences. Tenth edition
 
