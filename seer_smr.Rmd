@@ -1,0 +1,85 @@
+---
+title: "SMR SEER"
+author: "Genesis Rodriguez"
+date: "2024-12-20"
+output: html_document
+---
+
+```{r libraries, include = FALSE}
+
+library(readxl)
+library(dplyr)
+library(mgcv)
+library(ggplot2)
+library(openxlsx)
+library(popEpi)
+library(Epi)
+library(data.table)  
+library(lubridate)
+library(stringr)
+
+```
+
+```{r cancer_data}
+
+# Cleansed cancer data
+
+cancer <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_cleansed.csv")
+}, error = function(e) {
+  read.csv("~/Downloads/Registro Central de Cancer/cancer_cleansed.csv")
+}, error = function(e) {
+  read.csv("~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_cleansed.csv")
+}))
+cancer <- cancer %>%
+  mutate(FollowUpStart = as.Date(FollowUpStart),
+         DiagnosisDate = as.Date(DiagnosisDate),
+         FollowUpEnd = as.Date(FollowUpEnd),
+         FollowUpEnd = if_else(month(FollowUpEnd) == 1 & day(FollowUpEnd) == 1,
+                        FollowUpEnd + days(1),  # If the date is January 1, add one day
+                        FollowUpEnd),
+         maritallabel = str_to_title(ifelse(maritallabel == "unknown",
+                               NA,
+                               maritallabel)),
+         Comorb.cat = factor(ifelse(Comorb == '0' , 'No', 
+                             ifelse(as.numeric(Comorb) >= 1, 'Yes', 'Unknown')),
+                             levels= c('Yes','No','Unknown')))
+
+cancer$yearDiagCat <- cut(cancer$ydiag, 
+                   breaks = c(2003, 2009, 2014, 2019), 
+                   labels = c("2004-2009", "2010-2014", "2015-2019"),
+                   right = TRUE)
+cancer$deathYearCat <- cut(cancer$yy_dlc, 
+                   breaks = c(2003, 2009, 2015, 2021, 2024), 
+                   labels = c("2004-2009", "2010-2015", "2016-2021", "2022-2024"),
+                   right = TRUE)
+
+cancer_observed <- cancer %>%
+  filter(FollowUpYears > 0)
+
+```
+
+
+```{r numerator}
+
+cat("Global SMR")
+
+
+# This function splits case-level observations by calendar time (per), age, and follow-up time
+c <- lexpand(cancer_observed, status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = FollowUpStart, # Without those that did not meet follow-up
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
+             aggre = list(agegroup = age, deathyear = per, ydiag, yearDiagCat, deathYearCat, Comorb.cat, maritallabel))
+
+# Global SMR
+smr_global <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95); smr_global
+
