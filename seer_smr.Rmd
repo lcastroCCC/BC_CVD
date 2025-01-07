@@ -3,6 +3,8 @@ title: "SMR SEER"
 author: "Genesis Rodriguez"
 date: "2024-12-20"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r libraries, include = FALSE}
@@ -70,16 +72,161 @@ c <- lexpand(cancer_observed, status = cvdStatus != 0,
              birth = birth_date,
              entry = FollowUpStart, # Without those that did not meet follow-up
              exit = FollowUpEnd, 
-             breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
-             aggre = list(agegroup = age, deathyear = per, ydiag, yearDiagCat, deathYearCat, Comorb.cat, maritallabel))
+             breaks = list(per = 2004:2022, age = c(20, 60, 70, 80, Inf)), 
+             aggre = list(agegroup = age, deathyear = per))
+
+# 5-year age groups
+c <- lexpand(cancer_observed, status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = FollowUpStart, # Without those that did not meet follow-up
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(0, 1, seq(5, 80, by = 5), Inf)),  
+             aggre = list(agegroup = age, deathyear = per))
+
+```
+
+```{r denominator}
+
+us_reference_raw <- read.delim("C:/Users/Genesis Rodriguez/Downloads/us_reference.txt")
+
+us_reference_clean <- us_reference_raw %>%
+  filter(!Year.of.death %in% c("1990-2022"),
+          Cause.of.death.recode %in% c(
+            "Diseases of Heart", 
+            "Cerebrovascular Diseases", 
+            "Atherosclerosis", 
+            "Aortic Aneurysm and Dissection", 
+            "Other Diseases of Arteries, Arterioles, Capillaries"),
+         Age.recode.with..1.year.olds != "Unknown") %>%  
+  mutate(across(
+    c(Age.Adjusted.Rate, Count, Population, Std.Pop), ~ as.numeric(gsub("[^0-9.]", "", .))),
+         across(c(2, 5, 6, 7, 8), as.numeric),     
+         across(c(1,3, 4), as.factor)) %>%
+  filter(Year.of.death %in% 2004:2021)
+
+us_reference <- us_reference_clean %>%
+  filter(Sex == "Female") %>%
+  mutate(age_group5 = as.numeric(substr(Age.recode.with..1.year.olds, 1, 2)),
+    Age_group = case_when(
+      str_detect(Age.recode.with..1.year.olds, "^00|^01|^05|^10|^15") ~ 0,
+      str_detect(Age.recode.with..1.year.olds, "^20|^25|^30|^35|^40|^45|^50|^55") ~ 20,
+      str_detect(Age.recode.with..1.year.olds, "^60|^65") ~ 60,
+      str_detect(Age.recode.with..1.year.olds, "^70|^75") ~ 70,
+      str_detect(Age.recode.with..1.year.olds, "^80|^85") ~ 80,
+      TRUE ~ NA
+    )
+  ) %>%
+  # group_by(Year.of.death, Age_group) %>%
+  group_by(Year.of.death, age_group5) %>%
+  summarise(n = sum(Count),
+            Population = sum(Population)) %>%
+  mutate(gen_cvd_rate = n / Population) %>%
+  rename(deathyear = Year.of.death,
+  #       agegroup = Age_group)
+          agegroup = age_group5)
+
+```
+
+```{r global_smr}
 
 # Global SMR
 smr_global <- sir(coh.data = c, coh.obs = 'from0to1', 
                   coh.pyrs = 'pyrs', 
-                  ref.data = gen_2, 
+                  ref.data = us_reference, 
                   ref.rate = 'gen_cvd_rate', 
                   adjust = c('deathyear', 'agegroup'), 
                   test.type = "homogeneity",
                   conf.type = "wald",
                   conf.level = 0.95); smr_global
 
+# SMR by year of death
+smr_deathyear <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = us_reference, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95, print = "deathyear"); smr_deathyear
+
+# SMR by agegroup
+smr_agegroup <- sir(coh.data = c, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = us_reference, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95, print = "agegroup"); smr_agegroup
+
+```
+
+```{r seer_data}
+
+seer <- read.delim("C:/Users/Genesis Rodriguez/Downloads/smrs_us_age_group_5.txt") %>%
+  select(c(Race.and.origin..recommended.by.SEER.,
+           Attained.Age,
+           Observed,
+           Expected,
+           Person.Years.at.Risk,
+           O.E, 
+           CI.Lower,
+           CI.Upper)) %>%
+  rename(agegroup = Attained.Age,
+         race_eth = Race.and.origin..recommended.by.SEER.,
+         pyrs = Person.Years.at.Risk,
+         sir = O.E,
+         sir.lo = CI.Lower,
+         sir.hi = CI.Upper) %>%
+  rename_with(tolower) %>%
+  filter(agegroup != "Total"); seer
+
+seer_white <- seer %>% 
+  filter(race_eth == "Non-Hispanic White")
+
+seer_black <- seer %>% 
+  filter(race_eth == "Non-Hispanic Black")
+
+seer_asian <- seer %>% 
+  filter(race_eth == "Non-Hispanic Asian or Pacific Islander")
+
+seer_hispanic <- seer %>% 
+  filter(race_eth == "Hispanic (All Races)")
+
+seer_american_indian <- seer %>% 
+  filter(race_eth == "Non-Hispanic American Indian/Alaska Native (PRCDA counties only)")
+
+seer_all <- seer %>% 
+  filter(race_eth == "All races/ethnicities")
+
+
+```
+
+
+```{r merging_smrs}
+
+pr <- smr_agegroup %>%
+  select(!p_value) %>%
+  mutate(race_eth = "Puerto Rico",
+         agegroup = ifelse(agegroup != 80,
+                           paste0(agegroup, "-", agegroup+4),
+                           paste0(agegroup, "+"))) %>%
+  relocate(race_eth)
+
+merge <- rbind(pr, seer_all) %>%
+  mutate(sir_with_interval = paste0(sir, " (", sir.lo, "-", sir.hi, ")")) %>%
+ select(race_eth, agegroup, sir_with_interval) %>%
+ pivot_wider(
+    names_from = race_eth,
+    values_from = sir_with_interval) %>% 
+  filter(!is.na(`Puerto Rico`)); merge
+
+merge <- rbind(pr, seer_hispanic) %>%
+  mutate(sir_with_interval = paste0(sir, " (", sir.lo, "-", sir.hi, ")")) %>%
+ select(race_eth, agegroup, sir_with_interval) %>%
+ pivot_wider(
+    names_from = race_eth,
+    values_from = sir_with_interval) %>% 
+  filter(!is.na(`Puerto Rico`)); merge
+
+```
