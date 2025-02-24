@@ -13,3 +13,4 @@ wrangling_cancer_registry_patients_cache*
 wrangling_NCHS_fatalities_cache*
 *.DS_Store
 seer_smr.pdf
+~/.boxr-oauth

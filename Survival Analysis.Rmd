@@ -32,11 +32,10 @@ library(ggsurvfit)
 library(gtsummary)
 library(tidycmprsk)
 
-
+library(gt)
 library(knitr)
 library(kableExtra)
 library(RColorBrewer)}
-
 
 ```
 
@@ -101,35 +100,49 @@ data$HealthRegion <- factor(data$HealthRegion,
 
 # Procedures (Treatment)
 
-data <- data %>% 
-  mutate(Procedure = ifelse(Surgery == 'Yes' & Chemotherapy != 'Yes' & Radiotherapy != 'Yes',
-                         'Surgery Only', 
-                 ifelse(Surgery != 'Yes' & Chemotherapy == 'Yes' & Radiotherapy != 'Yes',
-                        'Chemotherapy Only',
-                 ifelse(Surgery != 'Yes' & Chemotherapy != 'Yes' & Radiotherapy == 'Yes',
-                        'Radiotheraphy Only',
-                 ifelse(Surgery == 'Yes' & Chemotherapy == 'Yes' & Radiotherapy == 'Yes',
-                        'Surgery + Chemotherapy + Radiotherapy',
-                 ifelse(Surgery == 'Yes' & Chemotherapy == 'Yes' & Radiotherapy != 'Yes',
-                        'Surgery + Chemotherapy',
-                 ifelse(Surgery == 'Yes' & Chemotherapy != 'Yes' & Radiotherapy == 'Yes',
-                        'Surgery + Radiotherapy',
-                 ifelse(Surgery != 'Yes' & Chemotherapy == 'Yes' & Radiotherapy == 'Yes',
-                        'Chemotherapy + Radiotherapy',
-                 ifelse(Surgery == 'Unk' & Chemotherapy == 'Unk' & Radiotherapy == 'Unk',
-                        'Unknown',
-                 ifelse(Surgery == 'No' & Chemotherapy == 'No' & Radiotherapy == 'No',
-                        'No treatment','No treatment'
-                        )))))))))
-)
-data$Procedure <- with(data, factor(Procedure, 
-                                    levels = c('Surgery + Chemotherapy + Radiotherapy',
-                                               'Surgery + Radiotherapy','Surgery + Chemotherapy',
-                                               'Chemotherapy + Radiotherapy',
-                                               'Surgery Only','Chemotherapy Only', 
-                                               'Radiotheraphy Only','No treatment','Unknown'))
-)
+# data <- data %>% 
+#   mutate(Procedure = ifelse(Surgery == 'Yes' & Chemotherapy != 'Yes' & Radiotherapy != 'Yes',
+#                          'Surgery Only', 
+#                  ifelse(Surgery != 'Yes' & Chemotherapy == 'Yes' & Radiotherapy != 'Yes',
+#                         'Chemotherapy Only',
+#                  ifelse(Surgery != 'Yes' & Chemotherapy != 'Yes' & Radiotherapy == 'Yes',
+#                         'Radiotheraphy Only',
+#                  ifelse(Surgery == 'Yes' & Chemotherapy == 'Yes' & Radiotherapy == 'Yes',
+#                         'Surgery + Chemotherapy + Radiotherapy',
+#                  ifelse(Surgery == 'Yes' & Chemotherapy == 'Yes' & Radiotherapy != 'Yes',
+#                         'Surgery + Chemotherapy',
+#                  ifelse(Surgery == 'Yes' & Chemotherapy != 'Yes' & Radiotherapy == 'Yes',
+#                         'Surgery + Radiotherapy',
+#                  ifelse(Surgery != 'Yes' & Chemotherapy == 'Yes' & Radiotherapy == 'Yes',
+#                         'Chemotherapy + Radiotherapy',
+#                  ifelse(Surgery == 'Unk' & Chemotherapy == 'Unk' & Radiotherapy == 'Unk',
+#                         'Unknown',
+#                  ifelse(Surgery == 'No' & Chemotherapy == 'No' & Radiotherapy == 'No',
+#                         'No treatment','No treatment'
+#                         )))))))))
+# )
 
+ data <- data %>%
+   mutate(Procedure = case_when(
+      Surgery == "Yes" & Chemotherapy == "No" & Radiotherapy == "No" ~ "Surgery Only",
+      Chemotherapy == "No" & Radiotherapy == "Yes" ~ "Radiotherapy Only",
+      Chemotherapy == "Yes" & Radiotherapy == "No" ~ "Chemotherapy Only",
+      Chemotherapy == "Yes" & Radiotherapy == "Yes" ~ "Chemotherapy and Radiotherapy",
+      TRUE ~ "Other"
+    ))
+ 
+# data$Procedure <- with(data, factor(Procedure, 
+#                                     levels = c('Surgery + Chemotherapy + Radiotherapy',
+#                                                'Surgery + Radiotherapy','Surgery + Chemotherapy',
+#                                                'Chemotherapy + Radiotherapy',
+#                                                'Surgery Only','Chemotherapy Only', 
+#                                                'Radiotheraphy Only','No treatment','Unknown'))
+# )
+
+data$Procedure <-  factor(data$Procedure,
+                               levels = c("Surgery Only", "Chemotherapy Only",
+                                          "Radiotherapy Only", "Chemotherapy and Radiotherapy",
+                                          "Other"))
 
 # Comorbidities
 data <- data %>%
@@ -226,10 +239,12 @@ data <- data %>%
          FollowUpYears = as.numeric(difftime(FollowUpEnd, FollowUpStart, units = "days")) / 365.25,
          time = FollowUpYears,
          AgeFU = AgeDx + time,
-         maritallabel = factor(str_to_title(maritallabel)),
+         maritallabel = factor(str_to_title(maritallabel), levels = c("Married", "Unmarried", "Unknown")),
          AgeDx = ifelse(AgeDx == 999, NA, AgeDx),
-         AgeDxCat = as.factor(case_when(AgeDx >= 18 & AgeDx <= 59 ~ "18-59",
-                                            AgeDx >= 60 & AgeDx <= 69 ~ "60-69",
+         AgeDxCat = as.factor(case_when(AgeDx >= 18 & AgeDx <= 39 ~ "18-39",
+                                            AgeDx >= 40 & AgeDx <= 49 ~ "40-49",
+                                        AgeDx >= 50 & AgeDx <= 59 ~ "50-59",
+                                        AgeDx >= 60 & AgeDx <= 69 ~ "60-69",
                                             AgeDx >= 70 & AgeDx <= 79 ~ "70-79",
                                             AgeDx >= 80 ~ "80+",
                                             TRUE ~ NA)))
@@ -289,7 +304,7 @@ fisher_sim_p <- function(data, variable, by, ...) {
   result
 }
 
-data %>%
+gt_table1 <- data %>%
   select(c(Vital, AgeDx, AgeDxCat, AgeFU, time, HealthRegion, maritallabel, Procedure, StageAtDx, ER, PR, HER2.cat, CsumCat, `Myocardial Infarction`, `Congestive heart failure`, `Peripheral vascular disease`, `Cerebrovascular disease`, `Chronic pulmonary disease`, `Diabetes without chronic complication`, `Diabetes with chronic complication`)) %>%
   filter(Vital != "Alive", !is.na(AgeDxCat)) %>% 
  tbl_summary(by = Vital,
@@ -321,14 +336,159 @@ add_p(
       
     )) %>%
   modify_footnote(everything() ~ NA) %>%
-  modify_caption("**Table 1: Baseline Characteristics of Study Population**") #%>%
- #modify_column_hide(columns = "stat_3") #%>%
-  #as_gt() %>%
-# gt::tab_source_note("Note: Values are N (%), unless otherwise indicated.")
+  modify_caption("**Table 1: Baseline Characteristics of Study Population**") %>%
+  as_gt(); gt_table1
+
+# Saving table
+gtsave(gt_table1, "~/Downloads/Statistical Analysis/Outputs/Tables/Table_1_PR.html")
+
+webshot::webshot("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Tables/Table_1_PR.html",
+                 path.expand("~/Downloads/Statistical Analysis/Outputs/Tables/Table_1_PR.png"),
+                 vwidth = 900,
+                 vheight = 2700)
+
+```
+
+```{r v2_with_less_variables}
+
+library(gtsummary)
+library(gt)
+library(dplyr)
+library(stringr)
+
+gt_table1 <- data %>%
+  select(c(Vital, AgeDxCat, StageAtDx, Procedure, HealthRegion, maritallabel)) %>%
+  filter(Vital != "Alive", !is.na(AgeDxCat)) %>% 
+  tbl_summary(
+    by = Vital,
+    label = c(AgeDxCat ~ "Age at Diagnosis",
+              HealthRegion ~ "Health Region",
+              maritallabel ~ "Marital Status",
+              Procedure ~ "Treatment",
+              StageAtDx ~ "Stage at Diagnosis"),
+    type = all_continuous() ~ "continuous2",
+    statistic = list(
+      all_continuous() ~ c(
+        "{mean}(±{sd})",
+        "{median} ({p25}-{p75})",
+        "{min}-{max}"
+      ),
+      all_categorical() ~ "{n} ({p}%)"
+    )
+  ) %>%
+  add_overall(col_label = "**Total**  \nN = {style_number(N)}") %>%
+  modify_table_body(
+    ~ .x %>%
+      dplyr::mutate(stat_0 = ifelse(variable %in% c("AgeDxCat", "StageAtDx", "Procedure", "HealthRegion", "maritallabel"), 
+                                    stringr::str_remove(stat_0, " \\(.*\\)"), stat_0))
+  ) %>%
+  add_p(
+    test = list(
+      all_continuous() ~ "oneway.test", # Welch's ANOVA due to no assumption of homogeneity of variances
+      c(Procedure, HealthRegion) ~ "fisher_sim_p", # Simulated p-values
+      all_categorical() ~ "chisq.test"  # Default chi-square for most variables
+    )
+  ) %>%
+  modify_footnote(everything() ~ NA) %>%
+  modify_caption("**Table 1: Baseline Characteristics of Study Population**") %>%
+  as_gt() %>%
+  tab_style(
+    style = cell_borders(
+      sides = "right",
+      color = "lightgrey",
+      weight = px(2)
+    ),
+    locations = cells_body(columns = stat_0)
+  ) %>%
+  tab_style(
+    style = cell_borders(
+      sides = "right",
+      color = "lightgrey",
+      weight = px(2)
+    ),
+    locations = cells_column_labels(columns = stat_0)
+  ); gt_table1
+
+
+# Saving table
+gtsave(gt_table1, "~/Downloads/Statistical Analysis/Outputs/Tables/Table_1_PR.html")
+
+webshot::webshot("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Tables/Table_1_PR.html",
+                 path.expand("~/Downloads/Statistical Analysis/Outputs/Tables/Table_1_PR.png"),
+                 vwidth = 900,
+                 vheight = 1200)
 
 
 ```
 
+```{r v3_cvd_bc_vs_gen}
+
+# BC pop
+gt_table2 <- data %>%
+  filter(Vital == "CVD death", !is.na(AgeDxCat)) %>% 
+  mutate(
+  AgeDeath = ifelse(VitalStatus == 0,
+                           AgeDx + (yy_dlc - ydiag), NA),
+          AgeDeathCat = as.factor(case_when(AgeDeath >= 18 & AgeDeath <= 39 ~ "18-39",
+                                            AgeDeath >= 40 & AgeDeath <= 49 ~ "40-49",
+                                            AgeDeath >= 50 & AgeDeath <= 59 ~ "50-59",
+                                            AgeDeath >= 60 & AgeDeath <= 69 ~ "60-69",
+                                            AgeDeath >= 70 & AgeDeath <= 79 ~ "70-79",
+                                            AgeDeath >= 80 ~ "80+",
+                                            TRUE ~ NA)),
+  AgeDeathCat = factor(AgeDeathCat, levels = c("18-39", "40-49", "50-59", "60-69", "70-79", "80+")),
+                  maritallabel = factor(maritallabel, levels = c("Married", "Unmarried", "Unknown"))) %>%
+  select(c(AgeDeathCat, maritallabel)) %>%
+  tbl_summary(
+    label = c(AgeDeathCat ~ "Age at Death",
+              maritallabel ~ "Marital Status"),
+    type = all_continuous() ~ "continuous2",
+    statistic = list(
+      all_continuous() ~ c("{mean}(±{sd})", "{median} ({p25}-{p75})", "{min}-{max}"),
+      all_categorical() ~ "{n} ({p}%)")) %>%
+  modify_header(label = "**Characteristic**") %>%
+  modify_footnote(everything() ~ NA)
+
+# Gen pop dataset
+gen_table2 <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/gen_table2.csv")
+}, error = function(e) {
+  read.csv("~/Downloads/NCHS/gen_table2.csv")
+}))
+
+gt_table_genpop <- gen_table2 %>%
+  select(-X) %>%
+  mutate(AgeDeathCat2 = factor(AgeDeathCat2, levels = c("18-39", "40-49", "50-59", "60-69", "70-79", "80+")),
+         marital_status = factor(marital_status, levels = c("Married", "Unmarried", "Unknown"))) %>%
+  rename(AgeDeathCat = AgeDeathCat2, maritallabel = marital_status) %>%
+  tbl_summary(
+    label = c(AgeDeathCat ~ "Age at Death",
+              maritallabel ~ "Marital Status"),
+    type = all_continuous() ~ "continuous2",
+    statistic = list(
+      all_continuous() ~ c("{mean}(±{sd})", "{median} ({p25}-{p75})", "{min}-{max}"),
+      all_categorical() ~ "{n} ({p}%)")) %>%
+  modify_header(label = "** Population**") %>%
+  modify_footnote(everything() ~ NA)
+
+# Merge the tables side by side
+gt_table2 <- tbl_merge(
+  tbls = list(gt_table2, gt_table_genpop),
+  tab_spanner = c("**Breast Cancer Cohort**", "**General Population**")) %>% 
+  as_gt(); gt_table2
+
+
+
+# Saving table
+gtsave(gt_table2, "~/Downloads/Statistical Analysis/Outputs/Tables/Table_2_PR.html")
+
+webshot::webshot("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Tables/Table_2_PR.html",
+                 path.expand("~/Downloads/Statistical Analysis/Outputs/Tables/Table_1_PR.png"),
+                 vwidth = 900,
+                 vheight = 1200)
+
+
+```
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 # *Table 2: Summary statistics by mortality type*
@@ -818,22 +978,22 @@ print(km_plot2)
 summary_km <- summary(km_fit2, times = c(3, 5, 10, 15)) 
 allCT <- data.frame(
   time = summary_km$time,
-  strata = summary_km$strata,
+  #strata = summary_km$strata,
   surv_prob = summary_km$surv,
   lower_ci = summary_km$lower,
   upper_ci = summary_km$upper
 )
 
 allCT <- allCT %>%
-  mutate(value = paste0(100 * round(surv_prob,4), '(',100*round(lower_ci,4), '-',100*round(upper_ci,4), ')' ),
-        strata = gsub('Procedure=','',strata)) %>%
-  select(time, strata,value) %>%
+  mutate(value = paste0(100 * round(surv_prob,4), '(',100*round(lower_ci,4), '-',100*round(upper_ci,4), ')' )) %>%
+  #      strata = gsub('Procedure=','',strata)) %>%
+  select(time,value) %>%
   pivot_wider(values_from = value, names_from = time, values_fill = '0 (0-0)')%>%
   rename(`3-year (95% CI)` = `3`,
          `5-year (95% CI)` = `5`,
-         `10-year (95% CI)` = `10`,
-         `15-year (95% CI)` = `15`,
-         Treatment = strata)
+         `10-year (95% CI)` = `10`)
+         #`15-year (95% CI)` = `15`
+         #Treatment = strata)
 
 kable(allCT,  format = "html", escape = FALSE, align = "c")%>%
   kable_styling( full_width = FALSE) %>%

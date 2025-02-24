@@ -40,12 +40,14 @@ census <- suppressWarnings(tryCatch({
 
 census <- census %>%
   mutate(Age_Groups = case_when(
-    Age_Group %in% c(".18 to 24 years", ".25 to 44 years", ".45 to 49 years", ".50 to 54 years", ".55 to 59 years") ~ "18-59",
+    Age_Group %in% c(".18 to 24 years", ".25 to 29 years", ".30 to 34 years", ".35 to 39 years", ".45 to 49 years", ".50 to 54 years", ".55 to 59 years") ~ "18-59",
     Age_Group %in% c(".60 to 64 years", ".65 to 69 years", ".70 to 74 years", 
                      ".75 to 79 years", "70-79", ".80 to 84 years", ".85 years and over") ~ "60+"
   ),
   Age_Groups2 = case_when(
-    Age_Group %in% c(".18 to 24 years", ".25 to 44 years", ".45 to 49 years", ".50 to 54 years", ".55 to 59 years") ~ "18-59",
+    Age_Group %in% c(".18 to 24 years", ".25 to 29 years", ".30 to 34 years", ".35 to 39 years") ~ "18-39",
+    Age_Group %in% c(".40 to 44 years", ".45 to 49 years") ~ "40-49",
+    Age_Group %in% c(".50 to 54 years", ".55 to 59 years") ~ "50-59",
     Age_Group %in% c(".60 to 64 years", ".65 to 69 years") ~ "60-69",
     Age_Group %in% c(".70 to 74 years", ".75 to 79 years") ~ "70-79",
     Age_Group %in% c(".80 to 84 years", ".85 years and over") ~ "80+"
@@ -185,7 +187,9 @@ cvd_deaths_gen <- mort %>%
   mutate(AgeDeathCat = as.factor(case_when(detail_age >= 18 & detail_age <= 59 ~ "18-59",
                                            detail_age >= 60 ~ "60+",
                                            TRUE ~ NA)),
-         AgeDeathCat2 = as.factor(case_when(detail_age >= 18 & detail_age <= 59 ~ "18-59",
+         AgeDeathCat2 = as.factor(case_when(detail_age >= 18 & detail_age <= 39 ~ "18-39",
+                                            detail_age >= 40 & detail_age <= 49 ~ "40-49",
+                                            detail_age >= 50 & detail_age <= 59 ~ "50-59",
                                             detail_age >= 60 & detail_age <= 69 ~ "60-69",
                                             detail_age >= 70 & detail_age <= 79 ~ "70-79",
                                             detail_age >= 80 ~ "80+",
@@ -205,7 +209,7 @@ cvm_by_year_agegroup1 <- suppressWarnings(tryCatch({
   mutate(Year = as.numeric(Year))
 }))
 
-# Reading file grouped by year and age groups 0-59, 60-69, 70-79, 80+
+# Reading file grouped by year and age groups 0-39, 40-49, 50-59 60-69, 70-79, 80+
 cvm_by_year_agegroup2 <- suppressWarnings(tryCatch({
   read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cvm_by_year_agegroup2.csv", row.names = NULL) %>%
   mutate(Year = as.numeric(Year))
@@ -275,7 +279,7 @@ stdpop.singleages <- suppressWarnings(
     read.table("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/2000 US Std Population/stdpop.singleagesthru84.txt", 
                colClasses = "character", quote="\"", comment.char="")
   }, error = function(e) {
-    read.table(file.path(Sys.getenv("HOME"), "Downloads/stdpop.singleagesthru84.txt"), 
+    read.table("~/Downloads/stdpop.singleagesthru84.txt", 
                colClasses = "character", quote="\"", comment.char="")
   })
 ) %>%
@@ -284,8 +288,9 @@ stdpop.singleages <- suppressWarnings(
          Std_Population = as.numeric(substr(V1, 8, 18))) %>%
   select(-V1) %>%
   mutate(Age_Group = case_when(
-    Age >= 0 & Age <= 17 ~ "0-17", 
-    Age >= 18 & Age <= 59 ~ "18-59",  
+    Age >= 18 & Age <= 39 ~ "18-39", 
+    Age >= 40 & Age <= 49 ~ "40-49", 
+    Age >= 50 & Age <= 59 ~ "50-59", 
     Age >= 60 & Age <= 69 ~ "60-69",  
     Age >= 70 & Age <= 79 ~ "70-79",  
     Age >= 80 ~ "80+",  
@@ -328,6 +333,34 @@ round(sum(table$adjustment_factor), 2)
 round(sum(table$n)/ sum(table$currentpop) * 100, 2)
 ```
 
+```{r summary_comparison_table_gen}
+gen_table2 <- mort %>%
+  filter(record_type == 1, # Resident of P.R.
+         detail_age_unit == 1, # Age in years
+         detail_age >= 18 &
+           detail_age != 999, # 18 years +
+         sex == "F", # Female
+         current_data_year != 2004, # Removing deaths outside follow-up period
+         grepl("^I(0|1[1,3]|2|3|4|5[0,1]|6|7[0-8])", `icd_code_10_th_revision`), # CVD fatalities
+         !grepl("^C50", `2_nd_condition`)|
+           !grepl("^C50", `3_rd_condition`)) %>% # Excluding BC fatalities 
+  mutate(marital_status = case_when(
+         marital_status == "M" ~ "Married",
+         marital_status == "D" ~ "Unmarried",
+         marital_status == "S" ~ "Unmarried",
+         marital_status == "W" ~ "Unmarried",
+         marital_status == "U" ~ "Unknown"),
+         AgeDeathCat2 = as.factor(case_when(detail_age >= 18 & detail_age <= 39 ~ "18-39",
+                                            detail_age >= 40 & detail_age <= 49 ~ "40-49",
+                                            detail_age >= 50 & detail_age <= 59 ~ "50-59",
+                                            detail_age >= 60 & detail_age <= 69 ~ "60-69",
+                                            detail_age >= 70 & detail_age <= 79 ~ "70-79",
+                                            detail_age >= 80 ~ "80+",
+                                            TRUE ~ NA))) %>% 
+  select(AgeDeathCat2, marital_status) 
+
+```
+
 ```{r exporting_gen_pop_rates, echo = FALSE}
 
 # Exporting general population rates by age groups 0-59 and 60+
@@ -344,6 +377,14 @@ tryCatch({
   write.csv(cvd_rates_gen2, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/cvm_rate_gen_pop2.csv")
 }, error = function(e) {
   write.csv(cvd_rates_gen2, "~/Downloads/NCHS/cvm_rate_gen_pop2.csv")
+})
+
+# Exporting gen table 2
+
+tryCatch({
+  write.csv(gen_table2, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/gen_table2.csv")
+}, error = function(e) {
+  write.csv(gen_table2, "~/Downloads/NCHS/gen_table2.csv")
 })
 
 ```

@@ -221,7 +221,7 @@ c <- lexpand(cancer_observed, status = cvdStatus != 0,
              birth = birth_date,
              entry = FollowUpStart, # Without those that did not meet follow-up
              exit = FollowUpEnd, 
-             breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
+             breaks = list(per = 2004:2022, age = c(0, 40, 50, 60, 70, 80, Inf)),
              aggre = list(agegroup = age, deathyear = per, ydiag, yearDiagCat, deathYearCat, Comorb.cat, maritallabel))
 
 # Global SMR
@@ -272,7 +272,7 @@ c2 <- lexpand(cancer_observed, status = cvdStatus != 0,
              birth = birth_date,
              entry = FollowUpStart, # Without those that did not meet follow-up
              exit = FollowUpEnd, 
-             breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
+             breaks = list(per = 2004:2022, age = c(0, 40, 50, 60, 70, 80, Inf)),
              aggre = list(agegroup = age, deathYearCat))
 
 smr_deathYearCat <- sir(coh.data = c2, coh.obs = 'from0to1', 
@@ -384,6 +384,55 @@ smr_facet <- sir(coh.data = c, coh.obs = 'from0to1',
                   print = c('deathyear', 'agegroup')); smr_facet # print selects which var to visualise
 ```
 
+```{r treatment}
+cancer_observed <- cancer_observed %>%
+  mutate(Procedure = case_when(
+    Surgery == "Yes" & Chemotherapy == "No" & Radiotherapy == "No" ~ "Surgery Only",
+    Chemotherapy == "No" & Radiotherapy == "Yes" ~ "Radiotherapy Only",
+    Chemotherapy == "Yes" & Radiotherapy == "No" ~ "Chemotherapy Only",
+    Chemotherapy == "Yes" & Radiotherapy == "Yes" ~ "Chemotherapy and Radiotherapy",
+    TRUE ~ "Other"),
+  Procedure = factor(Procedure, levels = c("Surgery Only", "Radiotherapy Only", "Chemotherapy Only",
+                     "Chemotherapy and Radiotherapy", "Other")))
+
+# This function splits case-level observations by calendar time (per), age, and follow-up time
+c <- lexpand(cancer_observed, status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = FollowUpStart, # Without those that did not meet follow-up
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(0, 40, 50, 60, 70, 80, Inf)),
+             aggre = list(agegroup = age, deathyear = per, ydiag, yearDiagCat, deathYearCat, Comorb.cat, maritallabel, Procedure))
+
+smr_proc <- sir(coh.data = c, coh.obs = 'from0to1', 
+                coh.pyrs = 'pyrs', 
+                ref.data = gen_2, 
+                ref.rate = 'gen_cvd_rate', 
+                adjust = c('deathyear', 'agegroup'), 
+                test.type = "trend",
+                conf.type = "wald",
+                conf.level = 0.95,
+                print ='Procedure'); smr_proc
+
+obj <- ggplot(data = smr_proc, aes(x = Procedure, y = sir, fill = Procedure)) +
+  geom_bar(stat = "identity", color = "black", width = 0.7) +  # Bar plot with black borders and custom width
+  geom_errorbar(aes(ymin = sir.lo, ymax = sir.hi), width = 0.2, color = "black") +  # Add error bars
+  geom_text(aes(label = round(sir, 2)), vjust = -0.5, hjust = -0.6, size = 3, fontface = "bold") +  # Add SMR labels above bars
+  xlab("Type of Treatment") +
+  ylab("Standardized Mortality Ratio (SMR) (95% CI)") +
+  scale_fill_manual(values = rep("indianred", length(unique(smr_proc$Procedure)))) + 
+  theme_minimal(base_size = 14) +  # Minimal theme with larger font
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10)) +  # Wrap x-axis labels to fit within ~10 characters per line
+  theme(element_text(angle = 0, hjust = 0.5),
+    axis.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "none"  # Remove legend if not needed
+  ) +
+  ggtitle("CVD Standardized Mortality Ratio by Type of Treament\nfor BC Survivors in Puerto Rico"); obj
+
+ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Graphs/pr_ref_procedure_graph.png", plot = obj, width = 10, height = 8, dpi = 300,  bg = "white")
+
+```
+
 ``` {r exporting_smrs, include = FALSE}
 
 # Create a new workbook
@@ -423,7 +472,7 @@ print("SMRs by year of diagnosis")
 smr_diag
 
 # Line graph by year of diagnosis
-ggplot(data = smr_diag, aes(x = ydiag, y = sir)) +
+ydiag_graph <- ggplot(data = smr_diag, aes(x = ydiag, y = sir)) +
   geom_line(color = "blue", size = 1.2) +  # Adjust line color and thickness
   geom_point(size = 3, shape = 21, fill = "white", color = "blue") +  # Add points with fill
   geom_ribbon(aes(ymin = sir.lo, ymax = sir.hi), fill = "lightblue", alpha = 0.3) +  # Confidence interval with fill color
@@ -439,9 +488,9 @@ ggplot(data = smr_diag, aes(x = ydiag, y = sir)) +
     axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels
     plot.title = element_text(face = "bold", hjust = 0.5)
   ) +
-  ggtitle("Standardized Mortality Ratio by Year of Diagnosis")
+  ggtitle("CVD Standardized Mortality Ratios by Year of Diagnosis\nfor BC Survivors in Puerto Rico"); ydiag_graph
 
-
+ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Graphs/pr_ref_diagnosisyear_graph.png", plot = ydiag_graph, width = 10, height = 8, dpi = 300,  bg = "white")
 
 
 # Line graph by year of death
@@ -498,18 +547,19 @@ ggplot(data = smr_deathYearCat, aes(x = deathYearCat, y = sir, group = 1)) +
 ```
 
 ```{r other_graphs, echo = FALSE}
->>>>>>> 39450fe4189cafcad71230a3759311a2b0208fba
 # Bar plot by age group
 smr_agegroup$agegroup <- factor(smr_agegroup$agegroup, 
-                                levels = c(18, 60, 70, 80), 
-                                labels = c("18-59", "60-69", "70-79", "80+"))
+                                levels = c(0, 40, 50, 60, 70, 80), 
+                                labels = c("18-39", "40-49", "50-59", "60-69", "70-79", "80+"))
 
-ggplot(data = smr_agegroup, aes(x = agegroup, y = sir, fill = as.factor(agegroup))) +
+obj <- ggplot(data = smr_agegroup[smr_agegroup$agegroup != "18-39", ], aes(x = agegroup, y = sir, fill = agegroup)) +
   geom_bar(stat = "identity", color = "black", width = 0.7) +  # Bar plot with black borders and custom width
   geom_errorbar(aes(ymin = sir.lo, ymax = sir.hi), width = 0.2, color = "black") +  # Add error bars
+  geom_text(aes(label = round(sir, 2)), vjust = -0.5, hjust = -0.6, size = 3, fontface = "bold") +  # Add SMR labels above bars
   xlab("Age Group") +
-  ylab("Standardized Mortality Ratio (SMR)") +
-  scale_fill_manual(values = c("#4E79A7", "#F28E2B", "#E15759", "#76B7B2")) +  # Professional color palette
+  ylab("Standardized Mortality Ratio (SMR) (95% CI)") +
+  scale_fill_manual(values = rep("indianred", length(unique(smr_agegroup$agegroup)))) + 
+  #  scale_fill_manual(values = c('#4E86A7', '#6B9F88', '#F1C04A', '#F07F47', '#D08690', '#9E7DB4')) +
   theme_minimal(base_size = 14) +  # Minimal theme with larger font
   theme(
     axis.title = element_text(face = "bold"),
@@ -517,7 +567,9 @@ ggplot(data = smr_agegroup, aes(x = agegroup, y = sir, fill = as.factor(agegroup
     plot.title = element_text(face = "bold", hjust = 0.5),
     legend.position = "none"  # Remove legend if not needed
   ) +
-  ggtitle("Standardized Mortality Ratio by Age Group")
+  ggtitle("CVD Standardized Mortality Ratio by Age Group\nfor BC Survivors in Puerto Rico"); obj
+
+ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Graphs/pr_ref_agegroup_graph.png", plot = obj, width = 10, height = 8, dpi = 300,  bg = "white")
 
 # Horizontal SMRs by year of diagnosis
 ggplot(data = smr_diag, aes(x = sir, y = ydiag)) +
@@ -652,23 +704,24 @@ ggplot(data = smr_deathYearCat, aes(x = sir, y = deathYearCat)) +
 ```{r smr_from_start, include = FALSE}
 # 
 # # This function splits case-level observations by calendar time (per), age, and follow-up time
-# c <- lexpand(cancer, status = cvdStatus != 0, 
-#              birth = birth_date,
-#              entry = DiagnosisDate, # From diagnosis
-#              exit = FollowUpEnd, 
-#              breaks = list(per = 2004:2022, age = c(18, 60, 70, 80, Inf)), 
-#              aggre = list(agegroup = age, year = per))
-# 
+c <- lexpand(cancer, status = cvdStatus != 0,
+             birth = birth_date,
+             entry = DiagnosisDate, # From diagnosis
+             exit = FollowUpEnd,
+             breaks = list(per = 2004:2022, age = c(0, 40, 50, 60, 70, 80, Inf)),
+             aggre = list(agegroup = age, year = per))
+             #aggre = list(agegroup = age, deathyear = per, ydiag, yearDiagCat, deathYearCat, Comorb.cat, maritallabel))
+
 # # Showing years, adjusted by year of death and age group
-# smr_year <- sir(coh.data = c, coh.obs = 'from0to1', 
-#                   coh.pyrs = 'pyrs', 
-#                   ref.data = gen_2, 
-#                   ref.rate = 'gen_cvd_rate', 
-#                   adjust = c('year', 'agegroup'), 
-#                   test.type = "homogeneity",
-#                   conf.type = "wald",
-#                   conf.level = 0.95,
-#                   print ='year'); smr_year
+smr_year <- sir(coh.data = c, coh.obs = 'from0to1',
+                  coh.pyrs = 'pyrs',
+                  ref.data = gen_2,
+                  ref.rate = 'gen_cvd_rate',
+                  adjust = c('year', 'agegroup'),
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95,
+                  print ='year'); smr_year
 # 
 # #Showing age groups, adjusted by year of death and age group
 # smr_agegroup <- sir(coh.data = c, coh.obs = 'from0to1', 
@@ -789,6 +842,71 @@ summary(regression)$deviance # The residual deviance of 219.81 indicates that th
 #   scale_color_brewer(palette = "Set1") +  # Use a color palette for better visibility
 #   scale_fill_brewer(palette = "Set1")  # Fill for the ribbon
 
+
+```
+
+```{r sensitivity_latency}
+
+#Diagnosis Date
+
+c_diag <- lexpand(cancer, status = cvdStatus != 0,
+             birth = birth_date,
+             entry = DiagnosisDate, # From diagnosis
+             exit = FollowUpEnd,
+             breaks = list(per = 2004:2022, age = c(0, 40, 50, 60, 70, 80, Inf)),
+             aggre = list(agegroup = age, deathyear = per, ydiag, yearDiagCat, deathYearCat, Comorb.cat, maritallabel))
+
+c_12 <- lexpand(cancer_observed, status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = FollowUpStart, # 12-months latency
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(0, 40, 50, 60, 70, 80, Inf)),
+             aggre = list(agegroup = age, deathyear = per, ydiag, yearDiagCat, deathYearCat, Comorb.cat, maritallabel))
+
+c_24 <- lexpand(cancer_observed, status = cvdStatus != 0, 
+                birth = birth_date,
+                entry = FollowUpStart %m+% years(1), # 24-months latency
+                exit = FollowUpEnd, 
+                breaks = list(per = 2004:2022, age = c(0, 40, 50, 60, 70, 80, Inf)),
+                aggre = list(agegroup = age, deathyear = per, ydiag, yearDiagCat, deathYearCat, Comorb.cat, maritallabel))
+
+smr_global_diag <- sir(coh.data = c_diag, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95)
+
+# 12-month latency period
+
+smr_global_12 <- sir(coh.data = c_12, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95)
+
+# 24-month latency period
+
+smr_global_24 <- sir(coh.data = c_24, coh.obs = 'from0to1', 
+                  coh.pyrs = 'pyrs', 
+                  ref.data = gen_2, 
+                  ref.rate = 'gen_cvd_rate', 
+                  adjust = c('deathyear', 'agegroup'), 
+                  test.type = "homogeneity",
+                  conf.type = "wald",
+                  conf.level = 0.95)
+
+# From date of diagnosis
+smr_global_diag
+# 12 months before follow-up starts
+smr_global_12
+# 12 months before follow-up starts
+smr_global_24
 
 ```
 

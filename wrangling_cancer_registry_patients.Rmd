@@ -42,15 +42,14 @@ cancer <- cancer.raw %>%
                            AgeDx + (yy_dlc - ydiag), NA),
          mm_dx = ifelse(is.na(mm_dx), 6, mm_dx),
          mm_dlc = ifelse(is.na(mm_dlc), 6, mm_dlc),
-         DiagnosisDate = make_date(year = ydiag, month = mm_dx, day = 1),
+         DiagnosisDate = make_date(year = ydiag, month = mm_dx, day = 2),
          FollowUpStart = DiagnosisDate %m+% years(1),
-         FollowUpEnd = make_date(year = yy_dlc, month = mm_dlc, day = 1),
-         FollowUpYears = as.numeric(difftime(FollowUpEnd, FollowUpStart, units = "days")) / 365.25,
-         AgeDeathCat = as.factor(case_when(AgeDeath < 60 ~ "18-59",
-                                           AgeDeath >= 60 ~ "60+",
-                                           TRUE ~ NA)),
+         FollowUpEnd = if_else(yy_dlc > 2021, as.Date("2021-12-31"), make_date(year = yy_dlc, month = mm_dlc, day = 2)),
+         FollowUpYears = if_else(FollowUpEnd < FollowUpStart, 0, 
+                        as.numeric(difftime(FollowUpEnd, FollowUpStart, units = "days")) / 365.25),
          AgeDeathCat2 = as.factor(case_when(AgeDeath >= 18 & AgeDeath <= 39 ~ "18-39",
-                                            AgeDeath >= 40 & AgeDeath <= 49 ~ "40-49",                                                                             AgeDeath >= 50 & AgeDeath <= 59 ~ "50-59",
+                                            AgeDeath >= 40 & AgeDeath <= 49 ~ "40-49",
+                                            AgeDeath >= 50 & AgeDeath <= 59 ~ "50-59",
                                             AgeDeath >= 60 & AgeDeath <= 69 ~ "60-69",
                                             AgeDeath >= 70 & AgeDeath <= 79 ~ "70-79",
                                             AgeDeath >= 80 ~ "80+",
@@ -67,7 +66,7 @@ cancer <- cancer.raw %>%
    select(EncryptedID, 
           mm_dx, ydiag, DiagnosisDate, FollowUpStart, AgeDx, birth_date, AgeFollowUpStart, 
           mm_dlc, yy_dlc, FollowUpEnd, FollowUpYears, AgeDeath, FollowUpYears,
-          AgeDeathCat, AgeDeathCat2, Vital, cvdStatus, SurvivalTime, maritallabel, Surgery, Radiotherapy, Chemotherapy,
+          AgeDeathCat2, Vital, cvdStatus, SurvivalTime, maritallabel, StageAtDx, Surgery, Radiotherapy, Chemotherapy,
           Comorb, DxCounty, DxCity, HealthRegion)
 
 # Reviewing exclusions | 65
@@ -87,18 +86,14 @@ cancer_observed <- cancer %>%
 cat("Follow up period needs to be contemplated: `Follow-up period will be defined beginning 1 year after their first primary BC diagnosis (to estimate treatment completion) until date of last contact, death, or end up study period (December 31, 2020), whichever came first.`")
 
 # Definir categorías de edad
-age_categories <- function(age) {
-  if (age < 60) {
-    return("18-59")
-  } else {
-    return("60+")
-  }
-}
-
 age_categories2 <- function(age) {
-  if (age < 60) {
-    return("18-59")
-  } else if (age >= 60 & age < 70) {
+  if (age < 39) {
+    return("18-39")
+    } else if (age >= 40 & age < 50) {
+    return("40-49")
+    } else if (age >= 50 & age < 60) {
+    return("50-59")
+      } else if (age >= 60 & age < 70) {
     return("60-69")
   } else if (age >= 70 & age < 80) {
     return("70-79")
@@ -122,7 +117,7 @@ calc_person_years_by_year <- function(id, start_date, end_date, start_age) {
     age_at_year_start <- start_age + (follow_years[i] - year(start_date))
     
     # Definir el año de seguimiento y las categorías de edad
-    age_group <- age_categories(age_at_year_start)
+   # age_group <- age_categories(age_at_year_start)
     age_group2 <- age_categories2(age_at_year_start)
     
     # Calcular el tiempo exacto contribuido dentro del año
@@ -143,7 +138,7 @@ calc_person_years_by_year <- function(id, start_date, end_date, start_age) {
     results <- rbind(results, data.frame(
       ID = id,  # ID del paciente
       Year = follow_years[i],  # Año de seguimiento
-      AgeGroup = age_group,  # Primera categoría de edad
+      #AgeGroup = age_group,  # Primera categoría de edad
       AgeGroup2 = age_group2,  # Segunda categoría de edad
       PersonYears = time_contributed  # Tiempo contribuido en ese año
     ))
