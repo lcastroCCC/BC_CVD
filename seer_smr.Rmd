@@ -124,7 +124,7 @@ cancer <- suppressWarnings(tryCatch({
 }, error = function(e) {
   read.csv("~/Downloads/Registro Central de Cancer/cancer_cleansed.csv")
 }, error = function(e) {
-  read.csv("~/../../projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_cleansed.csv")
+  read.csv("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_cleansed.csv")
 }))
 cancer <- cancer %>%
   mutate(FollowUpStart = as.Date(FollowUpStart),
@@ -173,7 +173,9 @@ us_reference_raw <- suppressWarnings(tryCatch({
   read.delim("C:/Users/Genesis Rodriguez/Downloads/Statistical Analysis/Inputs/us_reference.txt")
 }, error = function(e) {
 read.delim("~/Downloads/Statistical Analysis/Inputs/us_reference.txt")
-  }))
+  }, error = function(e) {
+read.delim("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/us_reference.txt")
+}))
 
 us_reference_clean <- us_reference_raw %>%
   filter(!Year.of.death %in% c("1990-2022"),
