@@ -246,7 +246,11 @@ pr_smr_general <- sir(coh.data = c, coh.obs = 'from0to1',
     CI.Upper = qchisq(1 - 0.05 / 2, df = 2 * (Observed + 1)) / (2 * Expected))  %>% 
   relocate(race_eth)
 
-us_smr_general <- read.delim("~/Downloads/Statistical Analysis/Inputs/smr_general.txt") %>%
+us_smr_general <- suppressWarnings(tryCatch({
+  read.delim("C:/Users/Genesis Rodriguez/Downloads/Statistical Analysis/Inputs/smr_general.txt")
+}, error = function(e) {
+read.delim("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Inputs/smr_general.txt")
+})) %>%
 select(Race.Ethnicity.CVD, 
          Observed, Expected, O.E, CI.Lower, CI.Upper) %>%
   rename(race_eth = Race.Ethnicity.CVD,
@@ -297,7 +301,11 @@ figure <- ggplot(merged_general, aes(y = fct_rev(race_eth), x = as.numeric(SMR))
 
 ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Graphs/general_graph.png", plot = figure, width = 10, height = 8, dpi = 300,  bg = "white")
 
-us_sir_general <- read.delim("~/Downloads/Statistical Analysis/Inputs/sir_general.txt") %>%
+us_sir_general <- suppressWarnings(tryCatch({
+  read.delim("C:/Users/Genesis Rodriguez/Downloads/Statistical Analysis/Inputs/sir_general.txt")
+}, error = function(e) {
+read.delim("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Inputs/sir_general.txt")
+})) %>%
   mutate(Count = as.numeric(gsub(",", "", Count))) %>%
   pull(Count)
 
@@ -337,7 +345,11 @@ pr_smr_deathyear <- sir(coh.data = c, coh.obs = 'from0to1',
   relocate(race_eth)
 
 # US SMRs by Death Year
-us_smr_deathyear <- read.delim("~/Downloads/Statistical Analysis/Inputs/smr_deathyear.txt") %>%
+us_smr_deathyear <- suppressWarnings(tryCatch({
+  read.delim("C:/Users/Genesis Rodriguez/Downloads/Statistical Analysis/Inputs/smr_deathyear.txt")
+}, error = function(e) {
+read.delim("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Inputs/smr_deathyear.txt")
+})) %>%
 select(c(Year.of.death.recode,
   Race.Ethnicity.CVD, 
          Observed, Expected, O.E, CI.Lower, CI.Upper)) %>%
@@ -591,9 +603,12 @@ pr_smr_diagnosisyear <- sir(coh.data = c, coh.obs = 'from0to1',
          CI.Upper = qchisq(1 - 0.05 / 2, df = 2 * (Observed + 1)) / (2 * Expected))  %>% 
   relocate(race_eth)
 
-# US SMRs by Death Year
-us_smr_diagnosisyear <- read.delim("~/Downloads/Statistical Analysis/Inputs/smr_diagnosisyear.txt") %>%
-select(c(Year.of.diagnosis,
+# US SMRs by Diagnosis Year
+us_smr_diagnosisyear <- suppressWarnings(tryCatch({
+  read.delim("C:/Users/Genesis Rodriguez/Downloads/Statistical Analysis/Inputs/smr_diagnosisyear.txt")
+}, error = function(e) {
+read.delim("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Inputs/smr_diagnosisyear.txt")
+})) %>% select(c(Year.of.diagnosis,
   Race.Ethnicity.CVD, 
          Observed, Expected, O.E, CI.Lower, CI.Upper)) %>%
   filter(!(Year.of.diagnosis %in% c("2000-2021", "2000", "2001", "2002", "2003", "2020", "2021")),
@@ -844,7 +859,7 @@ figure1 <- ggplot(merged_g_deathyear, aes(x = `Year of Death`, y = as.numeric(SM
     ); figure1
 
 
-ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Graphs/g_deathyear.png", plot = figure2, width = 10, height = 8, dpi = 300,  bg = "white")
+ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Graphs/g_deathyear.png", plot = figure1, width = 10, height = 8, dpi = 300,  bg = "white")
 
 
 
@@ -885,7 +900,11 @@ pr_smr_dx_agegroup <- sir(coh.data = c, coh.obs = 'from0to1',
   relocate(race_eth)
 
 # US Age Groups
-us_smr_dx_agegroup <- read.delim("~/Downloads/Statistical Analysis/Inputs/smr_dx_agegroup.txt") %>%
+us_smr_dx_agegroup <- suppressWarnings(tryCatch({
+  read.delim("C:/Users/Genesis Rodriguez/Downloads/Statistical Analysis/Inputs/smr_dx_agegroup.txt")
+}, error = function(e) {
+read.delim("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Inputs/smr_dx_agegroup.txt")
+})) %>%
 select(c(Age.recode.Dx,
   Race.Ethnicity.CVD, 
          Observed, Expected, O.E, CI.Lower, CI.Upper)) %>%
@@ -1034,7 +1053,11 @@ pr_smr_agegroup <- sir(coh.data = c, coh.obs = 'from0to1',
   relocate(race_eth)
 
 # US Age Groups
-us_smr_agegroup <- read.delim("~/Downloads/Statistical Analysis/Inputs/smr_agegroup.txt") %>%
+us_smr_agegroup <- suppressWarnings(tryCatch({
+  read.delim("C:/Users/Genesis Rodriguez/Downloads/Statistical Analysis/Inputs/smr_agegroup.txt")
+}, error = function(e) {
+read.delim("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Inputs/smr_agegroup.txt")
+  } )) %>%
 select(c(Attained.Age,
   Race.Ethnicity.CVD, 
          Observed, Expected, O.E, CI.Lower, CI.Upper)) %>%
@@ -1155,8 +1178,12 @@ pr_smr_stage <- sir(coh.data = c, coh.obs = 'from0to1',
     CI.Upper = qchisq(1 - 0.05 / 2, df = 2 * (Observed + 1)) / (2 * Expected))  %>% 
   relocate(race_eth)
 
-# US SMRs by Death Year
-us_smr_stage <- read.delim("~/Downloads/Statistical Analysis/Inputs/smr_stage.txt") %>%
+# US SMRs by Stage
+us_smr_stage <- suppressWarnings(tryCatch({
+  read.delim("C:/Users/Genesis Rodriguez/Downloads/Statistical Analysis/Inputs/smr_stage.txt")
+}, error = function(e) {
+read.delim("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Inputs/smr_stage.txt")
+  } )) %>%
 select(c(Combined.Summary.Stage..2004..,
   Race.Ethnicity.CVD, 
          Observed, Expected, O.E, CI.Lower, CI.Upper)) %>%
@@ -1260,7 +1287,11 @@ pr_smr_procedure <- sir(coh.data = c, coh.obs = 'from0to1',
   relocate(race_eth)
 
 # US SMRs by Procedure
-us_smr_procedure <- read.delim("~/Downloads/Statistical Analysis/Inputs/smr_procedure.txt") %>%
+us_smr_procedure <- suppressWarnings(tryCatch({
+  read.delim("C:/Users/Genesis Rodriguez/Downloads/Statistical Analysis/Inputs/smr_procedure.txt")
+}, error = function(e) {
+read.delim("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Inputs/smr_procedure.txt")
+  } ))  %>%
 select(c(Merged.Procedures,
   Race.Ethnicity.CVD, 
          Observed, Expected, O.E, CI.Lower, CI.Upper)) %>%
@@ -1359,7 +1390,11 @@ pr_smr_proc_stage <- sir(coh.data = c, coh.obs = 'from0to1',
 
 # US SMRs by Procedure and Stage
 
-us_smr_proc_stage <- read.delim("~/Downloads/Statistical Analysis/Inputs/smr_procedure_stage.txt") %>%
+us_smr_proc_stage <- suppressWarnings(tryCatch({
+  read.delim("C:/Users/Genesis Rodriguez/Downloads/Statistical Analysis/Inputs/smr_procedure_stage.txt")
+}, error = function(e) {
+read.delim("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Inputs/smr_procedure_stage.txt")
+  } )) %>%
   filter(!(Combined.Summary.Stage..2004.. %in% c("In situ", "Blank(s)", "N/A")),
          Race.Ethnicity.CVD != "All races/ethnicities") %>%
 select(c(Merged.Procedures, Combined.Summary.Stage..2004.., Race.Ethnicity.CVD, 
@@ -1604,7 +1639,11 @@ us_n <- us_sir_general %>% summarise(sum = sum(Count))
 
 ```{r sir_case_listing, include = FALSE}
 
-us_sir_general_cl_df <- read.delim2("~/Downloads/Statistical Analysis/Scripts/sir_general_case_listing.txt") %>%
+us_sir_general_cl_df <- suppressWarnings(tryCatch({
+  read.delim2("C:/Users/Genesis Rodriguez/Downloads/Statistical Analysis/Inputs/sir_general_case_listing.txt")
+}, error = function(e) {
+read.delim2("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Inputs/sir_general_case_listing.txt")
+  } )) %>%
   mutate(Survival.months = as.numeric(Survival.months),
          FollowUpYears = round((Survival.months - 12) / 12, 2),
          cvdStatus = ifelse(Cause.of.Death.CVD.recode == "CVD", 1, 0)) %>%
