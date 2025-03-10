@@ -174,7 +174,7 @@ us_reference_raw <- suppressWarnings(tryCatch({
 }, error = function(e) {
 read.delim("~/Downloads/Statistical Analysis/Inputs/us_reference.txt")
   }, error = function(e) {
-read.delim("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/us_reference.txt")
+read.delim("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Inputs/us_reference.txt")
 }))
 
 us_reference_clean <- us_reference_raw %>%
@@ -1584,7 +1584,11 @@ pr_sir_general <- cancer_observed %>%
   count(name = "Count") %>%
   mutate(race_eth = "PR Hispanic")
 
-us_sir_general <- read.delim("~/Downloads/Statistical Analysis/Inputs/sir_general.txt") %>%
+us_sir_general <- suppressWarnings(tryCatch({
+  read.delim("~/Downloads/Statistical Analysis/Inputs/")
+}, error = function(e) {
+read.delim("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Inputs/sir_general.txt")
+  } )) %>%
 select(Index.Record.Cause.of.Death.CVD.recode,
        Index.Record.Race.Ethnicity.CVD, 
        Count) %>%
