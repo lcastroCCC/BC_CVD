@@ -2,6 +2,7 @@ library(DiagrammeR)
 library(glue)
 library(DiagrammeRsvg)
 library(rsvg)
+library(magick)
 
 n1 <- nrow(cancer)
 exclude1_1 <- cancer %>% filter(is.na(AgeDx)) %>% nrow() # Missing age at diagnosis
@@ -25,6 +26,32 @@ exclude1_2 <- comma(exclude1_2)
 exclude2_2 <- comma(exclude2_2)
 include1_2 <- comma(include1_2)
 
+pr_sir_general <- cancer_observed %>%
+  mutate(Vital = as.character(Vital),
+         `Cause of Death` = case_when(
+           Vital == "CVD death" ~ "CVD Death",
+           Vital == "BC death" ~ "Other Causes of Death",
+           Vital == "Other Death" ~ "Other Causes of Death",
+           TRUE ~ Vital)) %>%
+  group_by(`Cause of Death`) %>%
+  count(name = "Count") %>%
+  mutate(race_eth = "PR Hispanic")
+
+us_sir_general <- read.delim("~/Downloads/Statistical Analysis/Inputs/sir_general.txt") %>%
+  select(Index.Record.Cause.of.Death.CVD.recode,
+         Index.Record.Race.Ethnicity.CVD, 
+         Count) %>%
+  rename(`Cause of Death` = Index.Record.Cause.of.Death.CVD.recode,
+         race_eth = Index.Record.Race.Ethnicity.CVD) %>% 
+  relocate(race_eth) %>%
+  mutate(Count = as.numeric(gsub(",", "", Count)),
+         `Cause of Death` = gsub("\\[OTHER\\]", "Other Causes of Death",
+                                 `Cause of Death`),
+         `Cause of Death` = gsub("CVD", "CVD Death",
+                                 `Cause of Death`))
+
+us_sir_general <- recode_race_eth(us_sir_general)
+
 white_alive <- comma(us_sir_general %>% filter(race_eth == "White", `Cause of Death` == "Alive") %>% pull(Count))
 white_cvd <- comma(us_sir_general %>% filter(race_eth == "White", `Cause of Death` == "CVD Death") %>% pull(Count))
 white_other <- comma(us_sir_general %>% filter(race_eth == "White", `Cause of Death` == "Other Causes of Death") %>% pull(Count))
@@ -45,7 +72,7 @@ pr_alive <- comma(pr_sir_general %>% filter(`Cause of Death` == "Alive") %>% pul
 pr_cvd <- comma(pr_sir_general %>% filter(`Cause of Death` == "CVD Death") %>% pull(Count))
 pr_other <- comma(pr_sir_general %>% filter(`Cause of Death` == "Other Causes of Death") %>% pull(Count))
 
-flowchart_svg <- grViz(
+svg <- grViz(
   glue("digraph my_flowchart {{ 
       graph[splines = ortho]
       node [fontname = Helvetica, shape = box, width = 2.5, height = 0.75, fontsize = 8]
@@ -125,8 +152,9 @@ flowchart_svg <- grViz(
       {{ rank = same; node2_1 node2_2 }}
        {{ rank = same; node3 }}
       
-  }}")
-) %>% export_svg()
+  }}")); svg
+svg_code <- svg %>% export_svg()
 
-# Save as PNG
-rsvg_png(charToRaw(flowchart_svg), file = "~/Downloads/Statistical Analysis/Outputs/Graphs/Flowchart.png", width = 2000, height = 1500)
+raster_img <- image_read_svg(svg_code, width = 2000, height = 1500) # Adjust resolution as needed
+image_write(raster_img, path = "~/Downloads/Statistical Analysis/Outputs/Graphs/Flowchart.tif", format = "tiff")
+

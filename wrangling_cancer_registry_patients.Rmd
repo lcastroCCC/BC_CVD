@@ -43,6 +43,16 @@ cancer <- cancer.raw %>%
          mm_dx = ifelse(is.na(mm_dx), 6, mm_dx),
          mm_dlc = ifelse(is.na(mm_dlc), 6, mm_dlc),
          DiagnosisDate = make_date(year = ydiag, month = mm_dx, day = 2),
+         yearDiagCat = cut(ydiag, 
+                   breaks = c(2003, 2009, 2014, 2019), 
+                   labels = c("2004-2009", "2010-2014", "2015-2019"),
+                   right = TRUE),
+         deathYearCat = case_when(
+                          VitalStatus == 0 & yy_dlc <= 2021 ~ cut(yy_dlc, 
+                           breaks = c(2003, 2009, 2015, 2021, 2024), 
+                           labels = c("2004-2009", "2010-2015", "2016-2021", "2022-2024"),
+                           right = TRUE),
+                           TRUE ~ NA_character_),
          FollowUpStart = DiagnosisDate %m+% years(1),
          FollowUpEnd = if_else(yy_dlc > 2021, as.Date("2021-12-31"), make_date(year = yy_dlc, month = mm_dlc, day = 2)),
          FollowUpYears = if_else(FollowUpEnd < FollowUpStart, 0, 
@@ -66,8 +76,29 @@ cancer <- cancer.raw %>%
    select(EncryptedID, 
           mm_dx, ydiag, DiagnosisDate, FollowUpStart, AgeDx, birth_date, AgeFollowUpStart, 
           mm_dlc, yy_dlc, FollowUpEnd, FollowUpYears, AgeDeath, FollowUpYears,
-          AgeDeathCat2, Vital, cvdStatus, SurvivalTime, maritallabel, StageAtDx, Surgery, Radiotherapy, Chemotherapy,
-          Comorb, DxCounty, DxCity, HealthRegion)
+          AgeDeathCat2, Vital, cvdStatus, yearDiagCat, deathYearCat, SurvivalTime, maritallabel, StageAtDx, Surgery, Radiotherapy, Chemotherapy,
+          Comorb, DxCounty, DxCity, HealthRegion) %>%
+    mutate(Procedure = case_when(
+    Surgery == "Yes" & Chemotherapy == "No" & Radiotherapy == "No" ~ "Surgery Only",
+    Chemotherapy == "No" & Radiotherapy == "Yes" ~ "Radiotherapy Only",
+    Chemotherapy == "Yes" & Radiotherapy == "No" ~ "Chemotherapy Only",
+    Chemotherapy == "Yes" & Radiotherapy == "Yes" ~ "Chemotherapy and Radiotherapy",
+    TRUE ~ "Other"),
+  Procedure = factor(Procedure, levels = c("Surgery Only", "Radiotherapy Only", "Chemotherapy Only",
+                     "Chemotherapy and Radiotherapy", "Other")),
+    AgeDxCat = case_when(
+      AgeDx <= 39 ~ "18-39",
+      AgeDx >= 40 & AgeDx <= 49 ~ "40-49",
+      AgeDx >= 50 & AgeDx <= 59 ~ "50-59",
+      AgeDx >= 60 & AgeDx <= 69 ~ "60-69",
+      AgeDx >= 70 & AgeDx <= 79 ~ "70-79",
+      AgeDx >= 80 ~ "80+", .default =  NA_character_))
+
+
+cancer$g_deathyear <- cut(year(cancer$FollowUpEnd), 
+                   breaks = c(2004, 2010, 2016, 2021), 
+                   labels = c("2005-2010", "2011-2016", "2017-2021"),
+                   right = TRUE)
 
 # Reviewing exclusions | 65
 exclusions <- cancer %>%   

@@ -98,30 +98,6 @@ data$HealthRegion <- factor(data$HealthRegion,
                                        'Este Fajardo','County Unknown'
                                        ))
 
-# Procedures (Treatment)
-
-# data <- data %>% 
-#   mutate(Procedure = ifelse(Surgery == 'Yes' & Chemotherapy != 'Yes' & Radiotherapy != 'Yes',
-#                          'Surgery Only', 
-#                  ifelse(Surgery != 'Yes' & Chemotherapy == 'Yes' & Radiotherapy != 'Yes',
-#                         'Chemotherapy Only',
-#                  ifelse(Surgery != 'Yes' & Chemotherapy != 'Yes' & Radiotherapy == 'Yes',
-#                         'Radiotheraphy Only',
-#                  ifelse(Surgery == 'Yes' & Chemotherapy == 'Yes' & Radiotherapy == 'Yes',
-#                         'Surgery + Chemotherapy + Radiotherapy',
-#                  ifelse(Surgery == 'Yes' & Chemotherapy == 'Yes' & Radiotherapy != 'Yes',
-#                         'Surgery + Chemotherapy',
-#                  ifelse(Surgery == 'Yes' & Chemotherapy != 'Yes' & Radiotherapy == 'Yes',
-#                         'Surgery + Radiotherapy',
-#                  ifelse(Surgery != 'Yes' & Chemotherapy == 'Yes' & Radiotherapy == 'Yes',
-#                         'Chemotherapy + Radiotherapy',
-#                  ifelse(Surgery == 'Unk' & Chemotherapy == 'Unk' & Radiotherapy == 'Unk',
-#                         'Unknown',
-#                  ifelse(Surgery == 'No' & Chemotherapy == 'No' & Radiotherapy == 'No',
-#                         'No treatment','No treatment'
-#                         )))))))))
-# )
-
  data <- data %>%
    mutate(Procedure = case_when(
       Surgery == "Yes" & Chemotherapy == "No" & Radiotherapy == "No" ~ "Surgery Only",
@@ -130,14 +106,6 @@ data$HealthRegion <- factor(data$HealthRegion,
       Chemotherapy == "Yes" & Radiotherapy == "Yes" ~ "Chemotherapy and Radiotherapy",
       TRUE ~ "Other"
     ))
- 
-# data$Procedure <- with(data, factor(Procedure, 
-#                                     levels = c('Surgery + Chemotherapy + Radiotherapy',
-#                                                'Surgery + Radiotherapy','Surgery + Chemotherapy',
-#                                                'Chemotherapy + Radiotherapy',
-#                                                'Surgery Only','Chemotherapy Only', 
-#                                                'Radiotheraphy Only','No treatment','Unknown'))
-# )
 
 data$Procedure <-  factor(data$Procedure,
                                levels = c("Surgery Only", "Chemotherapy Only",
@@ -233,10 +201,11 @@ data <- data %>%
 data <- data %>%
   mutate(mm_dx = as.numeric(ifelse(is.na(mm_dx), 6, mm_dx)),
          mm_dlc = as.numeric(ifelse(is.na(mm_dlc), 6, mm_dlc)),
-         DiagnosisDate = make_date(year = ydiag, month = mm_dx, day = 1),
+         DiagnosisDate = make_date(year = ydiag, month = mm_dx, day = 2),
          FollowUpStart = DiagnosisDate %m+% years(1),
-         FollowUpEnd = make_date(year = yy_dlc, month = mm_dlc, day = 1),
-         FollowUpYears = as.numeric(difftime(FollowUpEnd, FollowUpStart, units = "days")) / 365.25,
+         FollowUpEnd = if_else(yy_dlc > 2021, as.Date("2021-12-31"), make_date(year = yy_dlc, month = mm_dlc, day = 2)),
+         FollowUpYears = if_else(FollowUpEnd < FollowUpStart, 0, 
+                        as.numeric(difftime(FollowUpEnd, FollowUpStart, units = "days")) / 365.25),
          time = FollowUpYears,
          AgeFU = AgeDx + time,
          maritallabel = factor(str_to_title(maritallabel), levels = c("Married", "Unmarried", "Unknown")),
@@ -252,17 +221,10 @@ data$yearDiagCat <- cut(data$ydiag,
                    breaks = c(2003, 2009, 2014, 2019), 
                    labels = c("2004-2009", "2010-2014", "2015-2019"),
                    right = TRUE)
-#datatest <- data %>% select(Vital, ydiag, mm_dx, FollowUpStart, FollowUpEnd, yy_dlc, mm_dlc, FollowUpYears, time) 
-# data <- data %>%
-#   filter(time > 0) # Person met follow-up criteria
+
 data <- data %>%
   filter(time > 0) # Person met follow-up criteria
 
-# dataNO <- data %>%
-#   filter(time <= 0) # Person did not meet follow-up criteria
-# nrow(dataNO); nrow(data) # No follow-up period vs everyone
-# summary(dataNO$FollowUpYears)
-# table(dataNO$Vital)
 
 ```
 
