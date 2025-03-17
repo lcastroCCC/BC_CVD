@@ -12,6 +12,7 @@ editor_options:
 ---
 
 ```{r libraries, include = FALSE, cache = FALSE}
+
 knitr::opts_chunk$set(echo = FALSE, cache = FALSE, warning = FALSE, message = FALSE, results = "asis")
 
 library(readxl)
@@ -337,7 +338,6 @@ add_p(
   modify_footnote(everything() ~ NA) %>%
   modify_caption("**Table 1: Baseline Characteristics of Study Population**") %>%
   as_gt()
-
 
 ```
 
@@ -1935,6 +1935,68 @@ gt_smr_table1 <- combined_table %>%
         style = cell_text(weight = "bold"),
         locations = cells_body(rows = has_na)) %>%
   cols_hide(columns = has_na)
+
+```
+
+```{r sir}
+
+# SIR session
+
+pr_sir_general <- cancer_observed %>%
+  mutate(Vital = as.character(Vital),
+    `Cause of Death` = case_when(
+      Vital == "CVD death" ~ "CVD Death",
+      Vital == "BC death" ~ "Other Causes of Death",
+      Vital == "Other Death" ~ "Other Causes of Death",
+      TRUE ~ Vital)) %>%
+  group_by(`Cause of Death`) %>%
+  count(name = "Count") %>%
+  mutate(race_eth = "PR Hispanic")
+
+us_sir_general <- suppressWarnings(tryCatch({
+  read.delim("~/Downloads/Statistical Analysis/Inputs/")
+}, error = function(e) {
+read.delim("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Inputs/sir_general.txt")
+  } )) %>%
+select(Index.Record.Cause.of.Death.CVD.recode,
+       Index.Record.Race.Ethnicity.CVD, 
+       Count) %>%
+  rename(`Cause of Death` = Index.Record.Cause.of.Death.CVD.recode,
+         race_eth = Index.Record.Race.Ethnicity.CVD) %>% 
+  relocate(race_eth) %>%
+  mutate(Count = as.numeric(gsub(",", "", Count)),
+        `Cause of Death` = gsub("\\[OTHER\\]", "Other Causes of Death",
+    `Cause of Death`),
+    `Cause of Death` = gsub("CVD", "CVD Death",
+    `Cause of Death`))
+
+us_sir_general <- recode_race_eth(us_sir_general)
+
+us_sir_general_wider <- us_sir_general %>%
+ pivot_wider(names_from = c(race_eth), values_from = Count)
+
+
+merged_sir_general <- rbind(pr_sir_general, us_sir_general) %>%
+  mutate(race_eth = factor(race_eth, levels = c("PR Hispanic", "US Hispanic",
+                                                "White", "Black", "AANHPI & AIAN"))) %>%
+  group_by(race_eth) %>%
+  mutate(Count = paste0(comma(Count), " (", sprintf("%.2f", Count/ sum(Count) * 100), "%)")) %>%
+  arrange(race_eth) 
+
+merged_sir_general_wider <- merged_sir_general %>%
+  pivot_wider(names_from = c(race_eth), values_from = Count)
+
+# Creating gt table
+  
+gt_sir_general <- merged_sir_general_wider |> 
+  rename(`Vital status` = `Cause of Death`) |>
+  gt() |> 
+    tab_style(
+      style = cell_text(weight = "bold"), 
+      locations = cells_column_labels(everything())) |> 
+  cols_align(align = "center", columns = everything()); gt_sir_general
+
+>>>>>>> 1fd5aa90eaed4b1c061ae7e268eebeccf08ea326
 
 ```
 
