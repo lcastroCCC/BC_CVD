@@ -13,7 +13,7 @@ editor_options:
 
 ```{r libraries, include = FALSE, cache = FALSE}
 
-knitr::opts_chunk$set(echo = FALSE, cache = FALSE, warning = FALSE, message = FALSE, results = "asis")
+knitr::opts_chunk$set(echo = FALSE, cache = TRUE, warning = FALSE, message = FALSE, results = "asis")
 
 library(readxl)
 library(dplyr)
@@ -37,7 +37,30 @@ library(survminer) #for ggsurvplot graphs
 library(magick) # for tif file management
 library(forestploter) # for forest plots
 library(gridExtra) # joining forest plots
+library(broom)
+library(purrr)
+library(conflicted)
+library(extrafont)
+conflicts_prefer(lubridate::year)
+conflicts_prefer(dplyr::filter)
+conflicts_prefer(survival::Surv)
+library(showtext)
+font_import(pattern = "Times", prompt = FALSE)
+font_add("Times New Roman",
+         regular = "/System/Library/Fonts/Supplemental/Times New Roman.ttf",
+         bold = "/System/Library/Fonts/Supplemental/Times New Roman Bold.ttf")
 
+#font_add("Times New Roman", regular = "/System/Library/Fonts/Supplemental/Times New Roman.ttf")
+showtext_auto()
+showtext_opts(dpi = 300)
+base_path_cvd <- "~/Library/CloudStorage/Box-Box/Sanchez-Diaz Lab/CVD and BC/Statistical Analysis/Outputs/Figures/"
+
+theme_cvd <- theme(
+  text = element_text(size = 30), 
+  strip.text = element_text(angle = 0, face = "bold", size = 25), 
+  strip.background = element_rect(fill = NA, color = NA),
+  axis.text = element_text(size = 20),  
+  panel.spacing = unit(1, "lines"))
 
 ```
 
@@ -61,11 +84,18 @@ suppress_values <- function(data) {
 recode_race_eth <- function(df) {
   df <- df %>%
     mutate(race_eth = case_when(
-      race_eth == "Asian American, Native Hawaiian and other Pacific Islanders" ~ "AANHPI & AIAN",
+      race_eth == "White" ~ "NH White",
+      race_eth == "Black" ~ "NH Black",
+      race_eth == "Asian American, Native Hawaiian and other Pacific Islanders" ~ "NH AANHPI/AIAN",
+     # race_eth == "PR Hispanic" ~ "PR-H",
+    #  race_eth == "US Hispanic" ~ "US-H",
+     # race_eth == "White" ~ "US-NHW",
+      #race_eth == "Black" ~ "US-NHB",
+      #race_eth == "Asian American, Native Hawaiian and other Pacific Islanders" ~ "US-NH AANHPI/ \n AIAN",
       TRUE ~ as.character(race_eth)
     )) %>%
     mutate(race_eth = factor(race_eth, levels = c("PR Hispanic", "US Hispanic",
-                                                "White", "Black", "AANHPI & AIAN")))
+                                                "NH White", "NH Black", "NH AANHPI/AIAN")))
   return(df)
 }
 
@@ -132,6 +162,18 @@ sum_observed_columns <- function(df) {
     summarize(across(starts_with("Observed"), sum, na.rm = TRUE))
 }
 
+
+# JACC ggplot2 theme
+
+
+jacc_theme <- function() {
+ theme_bw(base_size = 16) +
+ theme(strip.background = element_blank(),
+ plot.title = element_text(face = "bold", hjust = 0.5))
+
+}
+
+
 ```
 
 ```{r cancer_data}
@@ -139,9 +181,7 @@ sum_observed_columns <- function(df) {
 # Cleansed cancer data
 
 cancer <- suppressWarnings(tryCatch({
-  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_cleansed.csv")
-}, error = function(e) {
-  read.csv("~/Downloads/Registro Central de Cancer/cancer_cleansed.csv")
+  read.csv("~/Library/CloudStorage/Box-Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_cleansed.csv")
 }, error = function(e) {
   read.csv("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_cleansed.csv")
 }))
@@ -168,7 +208,9 @@ cancer <- cancer %>%
   ),
    StageAtDx = factor(StageAtDx,
                    levels = c("Localized", "Regional", "Distant", "Unstaged"),
-                   labels = c("Localized", "Regional", "Distant", "Unknown/unstaged")))
+                   labels = c("Localized", "Regional", "Distant", "Unknown/unstaged")),
+   lagTime = as.numeric(difftime(FollowUpEnd, DiagnosisDate, units = "days")) / 365.25,
+   status = ifelse(Vital == 'CVD death',1, 0))
 
 cancer_observed <- cancer %>%
   filter(FollowUpYears > 0)
@@ -223,9 +265,14 @@ fisher_sim_p <- function(data, variable, by, ...) {
 }
 
 gt_pr_table1 <- cancer_observed %>%
+    mutate(
+HealthRegion = na_if(HealthRegion, "County Unknown"),
+    StageAtDx = na_if(StageAtDx, "Unknown/unstaged"),
+    StageAtDx = fct_drop(StageAtDx),
+    HealthRegion = fct_drop(HealthRegion)) %>%
   select(c(Vital, AgeDx, AgeDxCat, AgeDeath, FollowUpYears, HealthRegion, maritallabel, Procedure, StageAtDx)) %>%
   filter(Vital != "Alive", !is.na(AgeDxCat)) %>% 
- mutate(maritallabel = forcats::fct_na_value_to_level(maritallabel, level = "Unknown")) %>%
+#mutate(maritallabel = forcats::fct_na_value_to_level(maritallabel, level = "Unknown")) %>%
  tbl_summary(by = Vital,
               label = c(AgeDx ~ "Age at Diagnosis (Continuous)",
                         AgeDxCat ~ "Age at Diagnosis (Categorical)",
@@ -238,25 +285,29 @@ gt_pr_table1 <- cancer_observed %>%
                         StageAtDx ~ "Stage at Diagnosis"),
              type = all_continuous() ~ "continuous2",
              statistic = list(all_continuous() ~ c(
-      "{mean}(±{sd})",
+      "{mean} (±{sd})",
       "{median} ({p25}-{p75})",
       "{min}-{max}"),
     all_categorical() ~ "{n} ({p}%)"),
-    digits = all_continuous() ~ 1) %>%
+digits = list(all_continuous() ~ 2, all_categorical() ~ c(0, 2)),
+missing = "no") %>%
   add_overall(col_label = "**All death causes**.   \nN = {style_number(N)}") %>%
 add_p(
     test = list(
       all_continuous() ~ "oneway.test", # Welch's ANOVA due to no assumption of homogeneity of variances
-      c(Procedure, HealthRegion) ~ "fisher_sim_p", # Simulated p-values
-      all_categorical() ~ "chisq.test"  # Default chi-square for most variables
-      
+      c(Procedure, HealthRegion) ~ "fisher_sim_p",
+      all_categorical() ~ "chisq.test"
     )) %>%
-  modify_footnote(everything() ~ NA) %>%
+modify_footnote(
+    label ~ "The percentage of unknown participant characteristics was as follows: 7.13% for marital status, 0.13% for health region, and 4.21% for stage at diagnosis.",
+    stat_0 ~ NA,
+    stat_1 ~ NA,
+    stat_2 ~ NA,
+    stat_3 ~ NA,
+    p.value ~ "P-values were calculated using Welch's one-way test for continuous variables to account for unequal variances. For categorical variables, the chi-squared test was used unless cell counts were low, in which case Fisher's exact test was applied to obtain a simulated p-value.") %>%
+  #modify_footnote(everything() ~ NA) %>%
   modify_caption("**Table 1: Baseline Characteristics of Study Population**") %>%
-  as_gt() |>
-    tab_source_note(
-      source_note = "P-values were calculated using Welch's one-way test for continuous variables to account for unequal variances. For categorical variables, the chi-squared test was used unless cell counts were low, in which case Fisher's exact test was applied to obtain a simulated p-value."
-    )
+  as_gt()
 
 ```
 
@@ -266,7 +317,7 @@ c <- lexpand(cancer_observed, status = cvdStatus != 0,
              entry = FollowUpStart, # Without those that did not meet follow-up
              exit = FollowUpEnd, 
              breaks = list(per = 2004:2022, age = c(0, 40, 50, 60, 70, 80, Inf)),
-             aggre = list(agegroup = age, deathyear = per, ydiag, AgeDxCat, yearDiagCat, deathYearCat, Comorb.cat, Comorbidity, maritallabel, Procedure))
+             aggre = list(agegroup = age, deathyear = per, ydiag, AgeDxCat, yearDiagCat, deathYearCat, Comorb.cat, Comorbidity, maritallabel, StageAtDx))
 
 gen_2 <- suppressWarnings(tryCatch({
   read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/cvm_rate_gen_pop2.csv")
@@ -291,79 +342,9 @@ gt_pr_general <- sir(coh.data = c, coh.obs = 'from0to1',
                   conf.type = "wald",
                   conf.level = 0.95) %>%
     mutate(sir.lo = qchisq(0.05 / 2, df = 2 * observed) / (2 * expected),
-    sir.hi = qchisq(1 - 0.05 / 2, df = 2 * (observed + 1)) / (2 * expected)) %>% gt()
-
-# SMRs by year of death
-
-# By year of death
-smr_deathyear <- sir(coh.data = c, coh.obs = 'from0to1', 
-                  coh.pyrs = 'pyrs', 
-                  ref.data = gen_2, 
-                  ref.rate = 'gen_cvd_rate', 
-                  adjust = c('deathyear', 'agegroup'), 
-                  test.type = "homogeneity",
-                  conf.type = "wald",
-                  conf.level = 0.95,
-                  print ='deathyear') %>%
-    mutate(sir.lo = qchisq(0.05 / 2, df = 2 * observed) / (2 * expected),
-    sir.hi = qchisq(1 - 0.05 / 2, df = 2 * (observed + 1)) / (2 * expected))
-
-f_prdeathyear <- ggplot(data = smr_deathyear[-1, ], aes(x = deathyear, y = sir)) +
-  geom_line(color = "#4E79A7", size = 1.2) +  # Adjust line color and thickness
-  geom_point(size = 3, shape = 21, fill = "white", color = "#4E79A7") +  # Add points with fill
-  geom_ribbon(aes(ymin = sir.lo, ymax = sir.hi), fill = "lightblue", alpha = 0.3) +  # Confidence interval with fill color
-  geom_hline(yintercept = 1, color = "red", linetype = "dashed", size = 1) +  # Red dashed line at SMR = 1
-  geom_text(aes(label = round(sir, 1)), nudge_y = 0.7, nudge_x = -0.1, size = 4, color = "black") +  # Add labels with a slight upward offset
-  xlab("Year of Death") +
-  ylab("Standardized Mortality Ratio (SMR) (95% CI)") +
-  scale_x_continuous(breaks = smr_deathyear$deathyear) +  # Add all year labels
-  scale_y_continuous(breaks = seq(1, ceiling(max(smr_deathyear[-1, ]$sir.hi, na.rm = TRUE)), by = 2), limits = c(0, NA)) +
-  theme_minimal(base_size = 14) + 
-  theme(
-    axis.title = element_text(face = "bold"),
-    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels
-    plot.title = element_text(face = "bold", hjust = 0.5))
-
-# SMRs by grouped year of death
-
-smr_deathYearCat <- smr_deathyear %>%
-  mutate(`Year of Death` = case_when(
-    deathyear >= 2005 & deathyear <= 2010 ~ "2005-2010",
-    deathyear >= 2011 & deathyear <= 2016 ~ "2011-2016",
-    deathyear >= 2017 & deathyear <= 2021 ~ "2017-2021"
-  )) %>%
-  group_by(`Year of Death`) %>%
-  summarise(
-    Observed = sum(observed),
-    Expected = sum(expected),
-    .groups = "drop"
-  ) %>%
-  mutate(SMR = Observed / Expected,
-         CI.Lower = ifelse(
-           Observed == 0, 0, 
-           qchisq(0.05 / 2, df = 2 * Observed) / (2 * Expected)
-         ),
-         CI.Upper =  ifelse(
-           Observed == 0, Inf, 
-           qchisq(1 - 0.05 / 2, df = 2 * (Observed + 1)) / (2 * Expected))
-         )
-
-f_deathYearCat <- ggplot(data = smr_deathYearCat, aes(y = fct_rev(`Year of Death`), x = SMR, group = 1)) +
-  geom_point(size = 4, color = "#4E79A7") +  # Blue points for SMR
-  geom_errorbarh(aes(xmin = CI.Lower, xmax = CI.Upper), height = 0.2, color = "black") +  # Horizontal error bars
-  geom_vline(xintercept = 1, linetype = "dashed", color = "red", size = 1) +  # Reference line at SMR = 1
-  xlab("Standardized Mortality Ratio (SMR) (95% CI)") +
-  geom_text(aes(label = round(SMR, 1)), nudge_y = 0.1, size = 4, color = "black") +
-  scale_y_discrete(limits = rev(levels(smr_deathYearCat$`Year of Death`))) +  # Reverse y-axis order
-  scale_x_continuous(
-  breaks = scales::pretty_breaks(n = 6), 
-  limits = c(.5, NA)) +
-  ylab("Year of Death") +
-  theme_minimal(base_size = 14) +  # Minimal theme
-  theme(
-    axis.title = element_text(face = "bold"),
-    axis.text.y = element_text(face = "bold"),  # Bold y-axis labels
-    plot.title = element_text(face = "bold", hjust = 0.5))
+    sir.hi = qchisq(1 - 0.05 / 2, df = 2 * (observed + 1)) / (2 * expected)) %>% 
+  gt() %>%
+  fmt_number(columns = c(expected, sir, sir.lo, sir.hi), decimals = 2)
 
 # SMRs by year of diagnosis
 
@@ -389,77 +370,28 @@ smr_ydiag <- sir(coh.data = c, coh.obs = 'from0to1',
     "Upper 95% CI" = sir.hi,
     "P-Value" = p_value
   ) %>%
-  mutate(across(where(is.numeric), ~ round(.x, 1)))
+  mutate(across(where(is.numeric), ~ round(.x, 2)))
 
 f_ydiag <- ggplot(data = smr_ydiag, aes(x = `Year of Diagnosis`, y = `Standardized Mortality Ratio (SMR)`)) +
-  geom_line(color = "#4E79A7", size = 1.2) +  # Adjust line color and thickness
-  geom_point(size = 3, shape = 21, fill = "white", color = "#4E79A7") +  # Add points with fill
-  geom_ribbon(aes(ymin = `Lower 95% CI`, ymax = `Upper 95% CI`), fill = "lightblue", alpha = 0.3) +  # Confidence interval with fill color
-  geom_text(aes(label = round(`Standardized Mortality Ratio (SMR)`, 1)), nudge_y = 0.7, nudge_x = -0.1, size = 4, color = "black") +  # Add labels with a slight upward offset
-  geom_hline(yintercept = 1, color = "red", linetype = "dashed", size = 1) +  # Red dashed line at SMR = 1
+   geom_ribbon(aes(ymin = `Lower 95% CI`, ymax = `Upper 95% CI`), fill = "#d9eaf7", alpha = 0.4) +  # Confidence interval with fill color
+  geom_text(aes(label = format(round(`Standardized Mortality Ratio (SMR)`, 2), nsmall = 2)), nudge_y = 1, nudge_x = -0.1, size = 5, color = "black", 
+family = "Times New Roman") + 
+  geom_line(color = "royalblue4", size = 0.8) +
+  geom_point(size = 1.25, shape = 21, fill = "royalblue4", color = "royalblue4") +
+  geom_hline(yintercept = 1, color = "#FF3D2E", linetype = "dashed", size = 0.5) +  # #Red dashed line at SMR = 1
   xlab("Year of Diagnosis") +
-  ylab("Standardized Mortality Ratio (SMR) (95% CI)") +
-  scale_x_continuous(breaks = smr_ydiag$`Year of Diagnosis`) +  # Add all year labels
-  scale_y_continuous(breaks = seq(1, max(smr_ydiag$`Upper 95% CI`, na.rm = TRUE), by = 2), limits = c(1, NA)) +  # Breaks start at 1
-  theme_minimal(base_size = 14) +  # Use a minimal theme with larger font
-  theme(
-    axis.title = element_text(face = "bold"),
-    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels
-    plot.title = element_text(face = "bold", hjust = 0.5))
+  ylab("SMR") +
+  scale_x_continuous(breaks = smr_ydiag$`Year of Diagnosis`) +
+  scale_y_continuous(breaks = seq(1, max(smr_ydiag$`Upper 95% CI`, na.rm = TRUE), by = 2), limits = c(1, NA)) +
+  jacc_theme() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.title = element_text(size = 24),
+        axis.text = element_text(size = 16),
+    axis.text.x = element_text(angle = 45, hjust = 1), text = element_text(family = "Times New Roman"))
 
-ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/pr_diagnosisyear_graph.tif", plot = f_ydiag, width = 10, height = 6, dpi = 300,  bg = "white")
+ggsave(file.path(base_path_cvd, "pr_diagnosisyear_graph.png"), plot = f_ydiag, width = 10, height = 6, dpi = 300,  bg = "white")
 
-f_ydiag2 <- ggplot(data = smr_ydiag, aes(y = `Year of Diagnosis`, x = `Standardized Mortality Ratio (SMR)`)) +
-  geom_point(size = 4, color = "#4E79A7") +  # Blue points for SMR
-  geom_errorbarh(aes(xmin = `Lower 95% CI`, xmax = `Upper 95% CI`), height = 0.2, color = "black") +  # Horizontal error bars
-  geom_vline(xintercept = 1, linetype = "dashed", color = "red", size = 1) +  # Reference line at SMR = 1
-  xlab("Standardized Mortality Ratio (SMR) (95% CI)") +
-  scale_y_reverse(n.breaks = length(smr_ydiag$`Year of Diagnosis`)) +  # Reverse the y-axis order for continuous variables
-  scale_x_continuous(breaks = seq(1, max(smr_ydiag$`Upper 95% CI`, na.rm = TRUE), by = 2), limits = c(1, NA)) +  # Breaks start at 1
-  ylab("Year of Diagnosis") +
-  theme_minimal(base_size = 14) +  # Minimal theme
-  theme(
-    axis.title = element_text(face = "bold"),
-    axis.text.y = element_text(face = "bold"),  # Bold y-axis labels
-    plot.title = element_text(face = "bold", hjust = 0.5))
-
-# SMRs by grouped year of diagnosis
-
-smr_diagCat <- smr_ydiag %>%
-  mutate(`Year of Diagnosis` = case_when(
-    `Year of Diagnosis` >= 2004 & `Year of Diagnosis` <= 2009 ~ "2004-2009",
-    `Year of Diagnosis` >= 2010 & `Year of Diagnosis` <= 2014 ~ "2010-2014",
-    `Year of Diagnosis` >= 2015 & `Year of Diagnosis` <= 2019 ~ "2015-2019"
-  )) %>%
-  group_by(`Year of Diagnosis`) %>%
-  summarise(
-    Observed = sum(Observed),
-    Expected = sum(Expected),
-    .groups = "drop"
-  ) %>%
-  mutate(SMR = Observed / Expected,
-         CI.Lower = ifelse(
-           Observed == 0, 0, 
-           qchisq(0.05 / 2, df = 2 * Observed) / (2 * Expected)
-         ),
-         CI.Upper =  ifelse(
-           Observed == 0, Inf, 
-           qchisq(1 - 0.05 / 2, df = 2 * (Observed + 1)) / (2 * Expected))
-         )
-
-f_ydiagcat <- ggplot(data = smr_diagCat, aes(x = SMR, y = fct_rev(`Year of Diagnosis`))) +
-  geom_point(size = 4, color = "#4E79A7") +  # Blue points for SMR
-  geom_errorbarh(aes(xmin = CI.Lower, xmax = CI.Upper), height = 0.2, color = "black") +
-  geom_text(aes(label = round(SMR, 1)), nudge_y = 0.2, size = 4, color = "black") + 
-  geom_vline(xintercept = 1, linetype = "dashed", color = "red", size = 1) +  
-  xlab("Standardized Mortality Ratio (SMR) (95% CI)") +
-  ylab("Year of Diagnosis") +
-  theme_minimal(base_size = 14) +  # Minimal theme
-  theme(
-    axis.title = element_text(face = "bold"),
-    axis.text.y = element_text(face = "bold"),  # Bold y-axis labels
-    plot.title = element_text(face = "bold", hjust = 0.5)
-  )
 
 # SMRs by age group
 
@@ -476,26 +408,34 @@ smr_agegroup <- sir(coh.data = c, coh.obs = 'from0to1',
     mutate(sir.lo = qchisq(0.05 / 2, df = 2 * observed) / (2 * expected),
     sir.hi = qchisq(1 - 0.05 / 2, df = 2 * (observed + 1)) / (2 * expected))
 
-f_pragegroup <- ggplot(data = smr_agegroup[smr_agegroup$AgeDxCat != "18-39", ], aes(x = AgeDxCat, y = sir, fill = AgeDxCat)) +
-  geom_bar(stat = "identity", color = "black", width = 0.7) +  # Bar plot with black borders and custom width
-  geom_errorbar(aes(ymin = sir.lo, ymax = sir.hi), width = 0.2, color = "black") +  # Add error bars
-  geom_text(aes(label = sprintf("%.1f", sir)), vjust = -0.5, hjust = -0.6, size = 5) +  # Add SMR labels above bars
-  xlab("Age at Diagnosis") +
-  ylab("Standardized Mortality Ratio (SMR) (95% CI)") +
-  scale_fill_manual(values = rep("indianred", length(unique(smr_agegroup$AgeDxCat)))) + 
-  theme_minimal() +
-  theme(text = element_text(size = 16),
-    axis.title = element_text(face = "bold"),
-    axis.text.x = element_text(hjust = 1),  # Rotate x-axis labels
-    plot.title = element_text(face = "bold", hjust = 0.5),
-    legend.position = "none"  # Remove legend if not needed
-  )
+f_pragegroup <- ggplot(data = smr_agegroup[smr_agegroup$AgeDxCat != "18-39", ], aes(y = fct_rev(AgeDxCat), x = sir, fill = AgeDxCat)) +
+  #geom_bar(stat = "identity", color = "royalblue4", width = 0.5) +
+  geom_errorbarh(aes(xmin = sir.lo, xmax = sir.hi), height = 0.2, color = "royalblue4") +  
+  geom_point(size = 4, color = "royalblue4") +  
+  geom_vline(xintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 0.5) +  
+  geom_text(aes(label = sprintf("%.2f", sir)), vjust = -1, hjust = 0.5, size = 4, family = "Times New Roman") + 
+  ylab("Age at Diagnosis") +
+  xlab("SMR") +
+  scale_fill_manual(values = rep("#d9eaf7", length(unique(smr_agegroup$AgeDxCat)))) +
+  jacc_theme() +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position = "none", 
+        axis.title = element_text(size = 18),
+        axis.text = element_text(size = 12),
+    text = element_text(family = "Times New Roman"))
 
-ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/pr_agegroup_diagnosis_graph.tif", plot = f_pragegroup, width = 11, height = 5.5, dpi = 300,  bg = "white")
+ggsave(file.path(base_path_cvd, "pr_agegroup_diagnosis_graph.png"), plot = f_pragegroup, width = 7, height = 5.5, dpi = 300,  bg = "white")
 
 # By treatment
+c_treatment <- lexpand(cancer_observed, status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = FollowUpStart, # Without those that did not meet follow-up
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(0, 40, 50, 60, 70, 80, Inf)),
+             aggre = list(agegroup = age, deathyear = per, Procedure))
 
-smr_treatment <- sir(coh.data = c, coh.obs = 'from0to1',
+smr_treatment <- sir(coh.data = c_treatment, coh.obs = 'from0to1',
                 coh.pyrs = 'pyrs',
                 ref.data = gen_2,
                 ref.rate = 'gen_cvd_rate',
@@ -507,52 +447,25 @@ smr_treatment <- sir(coh.data = c, coh.obs = 'from0to1',
     mutate(sir.lo = qchisq(0.05 / 2, df = 2 * observed) / (2 * expected),
     sir.hi = qchisq(1 - 0.05 / 2, df = 2 * (observed + 1)) / (2 * expected))
 
-f_prtreatment <- ggplot(data = smr_treatment, aes(x = Procedure, y = sir, fill = Procedure)) +
-  geom_bar(stat = "identity", color = "black", width = 0.7) +  # Bar plot with black borders and custom width
-  geom_errorbar(aes(ymin = sir.lo, ymax = sir.hi), width = 0.2, color = "black") +  # Add error bars
-  geom_text(aes(label = sprintf("%.1f", sir)), vjust = -0.5, hjust = -0.6, size = 5) +  # Add SMR labels above bars
-  xlab("Initial Treatment Type") +
-  ylab("Standardized Mortality Ratio (SMR) (95% CI)") +
-  scale_fill_manual(values = rep("indianred", length(unique(smr_treatment$Procedure)))) + 
-  theme_minimal() + 
-  scale_x_discrete(labels = function(x) str_wrap(x, width = 10)) +  # Wrap x-axis labels to fit within ~10 characters per line
-  theme(text = element_text(size = 16, angle = 0, hjust = 0.5),
-    axis.title = element_text(face = "bold"),
-    plot.title = element_text(face = "bold", hjust = 0.5),
-    legend.position = "none")
+f_prtreatment <- ggplot(data = smr_treatment[smr_treatment$observed >= 10,], aes(y = fct_rev(Procedure), x = sir, fill = Procedure)) +
+  geom_errorbarh(aes(xmin = sir.lo, xmax = sir.hi), height = 0.2, color = "royalblue4") +  
+  geom_point(size = 4, color = "royalblue4") +  
+  geom_vline(xintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 0.5) +  
+  geom_text(aes(label = sprintf("%.2f", sir)), vjust = -1, hjust = 0.5, size = 4, family = "Times New Roman") + 
+  ylab("Initial Treatment") +
+  xlab("SMR") +
+  scale_fill_manual(values = rep("#d9eaf7", length(unique(smr_treatment$Procedure)))) + 
+  jacc_theme() + 
+  scale_y_discrete(labels = function(x) str_wrap(x, width = 10)) +
+  jacc_theme()+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position = "none", 
+        text = element_text(family = "Times New Roman"),
+            axis.title = element_text(size = 18),
+        axis.text = element_text(size = 12))
 
-ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/pr_treatment.tif", plot = f_prtreatment, width = 11, height = 6, dpi = 300,  bg = "white")
-
-# By comorbidity status
-
-smr_comorb <- sir(coh.data = c, coh.obs = 'from0to1',
-                coh.pyrs = 'pyrs',
-                ref.data = gen_2,
-                ref.rate = 'gen_cvd_rate',
-                adjust = c('deathyear', 'agegroup'),
-                test.type = "homogeneity",
-                conf.type = "wald",
-                conf.level = 0.95,
-                print ='Comorbidity') %>%
-    mutate(sir.lo = qchisq(0.05 / 2, df = 2 * observed) / (2 * expected),
-    sir.hi = qchisq(1 - 0.05 / 2, df = 2 * (observed + 1)) / (2 * expected))
-
-f_comorb <- ggplot(data = smr_comorb, aes(x = sir, y = fct_rev(Comorbidity))) +
-  geom_point(size = 4, color = "#4E79A7") +  # Blue points for SMR
-  geom_errorbarh(aes(xmin = sir.lo, xmax = sir.hi), height = 0.2, color = "black") +  # Horizontal error bars
-  geom_vline(xintercept = 1, linetype = "dashed", color = "red", size = 1) +  # Reference line at SMR = 1
-  geom_text(aes(label = sprintf("%.1f", sir)), vjust = -0.7, size = 5) +  # Add SMR labels above bars
-  xlab("Standardized Mortality Ratio (SMR) (95% CI)") +
-  scale_y_discrete(name = "Number of comorbidities") +  # Discrete scale for y-axis
-  scale_x_continuous(breaks = seq(1, max(smr_comorb$sir.hi, na.rm = TRUE), by = 2), limits = c(1, NA)) +  # Breaks start at 1
-  theme_minimal(base_size = 14) +  # Minimal theme
-  theme(
-    axis.title = element_text(face = "bold"),
-    axis.text.y = element_text(face = "bold"),  # Bold y-axis labels
-    plot.title = element_text(face = "bold", hjust = 0.5)
-  )
-
-ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/pr_comorb.tif", plot = f_comorb, width = 11, height = 6, dpi = 300,  bg = "white")
+ggsave(file.path(base_path_cvd, "pr_treatment.png"), plot = f_prtreatment, width = 7.5, height = 5, dpi = 300,  bg = "white")
 
 ```
 
@@ -598,7 +511,7 @@ merged_sir_general <- rbind(pr_sir_general, us_sir_general) %>%
   mutate(race_eth = factor(race_eth, levels = c("PR Hispanic", "US Hispanic",
                                                 "White", "Black", "AANHPI & AIAN"))) %>%
   group_by(race_eth) %>%
-  mutate(Count = paste0(comma(Count), " (", sprintf("%.1f", Count/ sum(Count) * 100), "%)")) %>%
+  mutate(Count = paste0(comma(Count), " (", sprintf("%.2f", Count/ sum(Count) * 100), "%)")) %>%
   arrange(race_eth) 
 
 merged_sir_general_wider <- merged_sir_general %>%
@@ -650,7 +563,7 @@ us_sir_general_cl <- us_sir_general_cl_df %>%
 
 ```{r}
 
-source("~/BC_CVD/flowChart.R")
+#source("~/BC_CVD/flowChart.R")
 
 ```
 
@@ -700,7 +613,6 @@ select(Race.Ethnicity.CVD,
 
 merged_general <- rbind(pr_smr_general, us_smr_general) %>%
   mutate(race_eth = as.factor(race_eth),
-       #  across(c(Expected:CI.Upper), ~ format(round(as.numeric(.), 1), nsmall = 1)),
          race_eth = factor(race_eth, levels = c("PR Hispanic", "US Hispanic",
                                                 "White", "Black", "Asian American, Native Hawaiian and other Pacific Islanders"))) %>%
   arrange(race_eth)
@@ -708,17 +620,28 @@ merged_general <- rbind(pr_smr_general, us_smr_general) %>%
 merged_general <- recode_race_eth(merged_general)
 
 f_general <- ggplot(merged_general, aes(y = fct_rev(race_eth), x = as.numeric(SMR))) +
-    geom_point(size = 2, color = "#4E79A7") +  # Plot SMR points
-    geom_errorbar(aes(xmin = as.numeric(CI.Lower), xmax = as.numeric(CI.Upper)), width = 0.2) +
-    theme_minimal() +
-    scale_x_continuous(limits = c(0.60, 1.5)) +
-    geom_vline(xintercept = 1, linetype = "solid", color = "red", size = 0.2) +
-    geom_text(aes(label = sprintf("%.1f", as.numeric(SMR))), position = position_dodge(0), vjust = -1) +
-    labs(x = "Standardized Mortality Ratio (SMR) (95% CI)", y = "Race/Ethnicity") +
-    theme(axis.text.x = element_text(hjust = 1)) +
-    scale_y_discrete(labels = function(x) str_wrap(x, width = 20))
+    geom_vline(xintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 1) +
+  geom_errorbar(aes(xmin = as.numeric(CI.Lower), xmax = as.numeric(CI.Upper)), color = "royalblue4", width = 0.3, linewidth = 1) +
+    geom_point(size = 4, color = "royalblue4") +  # Plot SMR points
+    jacc_theme() +
+    scale_x_continuous(limits = c(0.60, 1.5), expand = expansion(mult = c(0.1, 0.1))) +
+    geom_text(aes(label = sprintf("%.2f", as.numeric(SMR))), size = 7, position = position_dodge(0), vjust = -1.5) +
+    labs(x = "SMR", y = "Race/Ethnicity") +
+  xlab("SMR") +
+  jacc_theme() +
+  coord_cartesian(clip = "off") +
+   theme(axis.text = element_text(size = 25),
+          axis.text.x = element_text(hjust = 1),
+          axis.text.y = element_text(colour = "black", face = "bold")) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    text = element_text(size = 30, family = "Times New Roman"),
+    strip.text = element_text(angle = 0, size = 25, lineheight = 0.7, face = "bold", margin = margin(b = 5)), 
+    strip.background = element_rect(fill = NA, color = NA))
 
-ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/general_graph.tif", plot = f_general, width = 10, height = 8, dpi = 300,  bg = "white")
+
+ggsave(file.path(base_path_cvd, "general_graph.png"), plot = f_general, width = 11.5, height = 10, dpi = 300,  bg = "white")
 
 # Supressing values under 10
 
@@ -835,11 +758,11 @@ gt_deathyear <- create_gt_table(merged_deathyear_wider)
 f_deathyear <- ggplot(merged_deathyear, aes(x = `Year of Death`, y = as.numeric(SMR), color = race_eth, fill = race_eth, group = race_eth)) +
   geom_line(size = 1) +  # Line for SMR over years
  # geom_ribbon(aes(ymin = as.numeric(CI.Lower), ymax = as.numeric(CI.Upper)), alpha = 0.2, color = NA) +  # Confidence interval ribbons
-  theme_minimal() +
+  jacc_theme() +
   geom_hline(yintercept = 1, linetype = "solid", color = "black", size = 0.5) +  # Horizontal line at SMR = 1
   labs(
     x = "Year of Death",
-    y = "Standardized Mortality Ratio (SMR) (95% CI)",
+    y = "SMR",
     color = "Race/Ethnicity",
     fill = "Race/Ethnicity"
   ) +
@@ -860,7 +783,7 @@ f_deathyear <- ggplot(merged_deathyear, aes(x = `Year of Death`, y = as.numeric(
     legend.title = element_text(size = 10),
     legend.text = element_text(size = 9))
 
-ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/grouped_deathyear_graph.tif", plot = f_deathyear, width = 10, height = 8, dpi = 300,  bg = "white")
+ggsave(file.path(base_path_cvd, "grouped_deathyear_graph.png"), plot = f_deathyear, width = 10, height = 8, dpi = 300,  bg = "white")
 
 ```
 
@@ -919,8 +842,8 @@ us_smr_g_deathyear <- us_smr_deathyear %>%
 
 merged_g_deathyear <- rbind(pr_smr_g_deathyear, us_smr_g_deathyear) %>%
   mutate(`Year of Death` = as.factor(`Year of Death`),
-         race_eth = factor(race_eth, levels = c("PR Hispanic", "US Hispanic", "White", "Black", "Asian American, Native Hawaiian and other Pacific Islanders")),
-         across(c(Expected:CI.Upper), ~ format(round(as.numeric(.), 1), nsmall = 1))) %>%
+         race_eth = factor(race_eth, levels = c("PR Hispanic", "US Hispanic", "White", "Black", "Asian American, Native Hawaiian and other Pacific Islanders"))) %>%
+        # across(c(Expected:CI.Upper), ~ format(round(as.numeric(.), 1), nsmall = 1))) %>%
   arrange(race_eth)
 
 # Suppressing values under 10
@@ -954,26 +877,21 @@ gt_g_deathyear <- create_gt_table(merged_g_deathyear_wider)
 ```{r grouped_deathyear_graph}
 
 f_g_deathyear <- ggplot(merged_g_deathyear, aes(y = `Year of Death`, x = as.numeric(SMR))) +
-    geom_point(size = 0.5, position = position_dodge(width = 0.5)) +
-    geom_errorbar(
+    geom_vline(xintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 0.5) +
+    geom_point(size = 0.7, position = position_dodge(width = 0.5), color = "royalblue4") +
+    geom_errorbar(color = "royalblue4",
         aes(xmin = as.numeric(CI.Lower), xmax = as.numeric(CI.Upper)),
         width = 0.2, position = position_dodge(width = 0.5)) +
-    geom_vline(xintercept = 1, linetype = "solid", color = "red", size = 0.2) +
-    facet_wrap(~ race_eth, ncol = 2) +  # Adjust `ncol` to create square facets
+    facet_wrap(~ race_eth, ncol = 2, scales = "free_x") +  # Adjust `ncol` to create square facets
+    #facet_wrap(~ race_eth, ncol = 2) +  # Adjust `ncol` to create square facets
   scale_y_discrete(limits = rev(unique(merged_g_deathyear$`Year of Death`))) +
-  theme_bw() +
-    labs(x = "", y = "Standardized Mortality Ratio (SMR) (95% CI)") +
-    theme(
-        text = element_text(size = 7), 
-        strip.text = element_text(angle = 0, face = "bold", size = 6), 
-        strip.background = element_rect(fill = NA, color = NA),
-        axis.text.x = element_text(size = 6),  
-        axis.text.y = element_text(size = 6), 
-        legend.position = "none",
-        panel.spacing = unit(0.5, "lines"))
+  #scale_x_continuous(limits = c(1,12)) +
+  theme_bw(base_family = "lato") +
+    labs(x = "SMR") +
+  theme_cvd +
+  theme(legend.position = "none")
 
-
-ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/g_deathyear.tif", plot = f_g_deathyear, width = 10, height = 8, dpi = 300,  bg = "white")
+ggsave(file.path(base_path_cvd, "g_deathyear.png"), plot = f_g_deathyear, width = 10, height = 8, dpi = 300,  bg = "white")
 
 ```
 
@@ -1030,7 +948,7 @@ read.delim("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/project
 
 merged_diagnosisyear <- rbind(pr_smr_diagnosisyear, us_smr_diagnosisyear) %>%
   mutate(across(c(race_eth, "Year of Diagnosis"), as.factor),
-         across(c(Expected:CI.Upper), ~ format(round(as.numeric(.), 1), nsmall = 1)),
+         across(c(Expected:CI.Upper), ~ format(round(as.numeric(.), 2), nsmall = 1)),
          race_eth = factor(race_eth, levels = c("PR Hispanic", "US Hispanic",
                                                 "White", "Black", "Asian American, Native Hawaiian and other Pacific Islanders"))) %>%
   arrange(race_eth)
@@ -1065,35 +983,41 @@ gt_diagnosisyear <- create_gt_table(merged_diagnosisyear_wider)
 
 ```{r diagnosisyear_graph}
 
-# Create the ggplot
 f_diagnosisyear <- ggplot(merged_diagnosisyear, aes(x = `Year of Diagnosis`, y = as.numeric(SMR), color = race_eth, fill = race_eth, group = race_eth)) +
-  geom_line(size = 1) +  # Line for SMR over years
-  theme_minimal() +
-  geom_hline(yintercept = 1, linetype = "solid", color = "red", size = 0.5) +  # Horizontal line at SMR = 1
+  geom_line(size = 1.5) +
+  jacc_theme() +
+  geom_ribbon(aes(ymin = as.numeric(CI.Lower), ymax = as.numeric(CI.Upper), fill = race_eth), alpha = 0.1, color = NA) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 1.5) +  
   labs(
     x = "Year of Diagnosis",
-    y = "Standardized Mortality Ratio (SMR) (95% CI)",
+    y = "SMR",
     color = "Race/Ethnicity",
     fill = "Race/Ethnicity") +
-  scale_fill_manual(values = c('#4E86A7', '#6B9F88', '#F1C04A', '#F07F47', '#D08690', '#9E7DB4')) +
-  scale_color_manual(values = c('#4E86A7', '#6B9F88', '#F1C04A', '#F07F47', '#D08690', '#9E7DB4')) +
-  scale_y_continuous(limits = c(0, 5)) +
+  scale_color_manual(values = c('#8AC926', '#FFCA3A', '#6A4C93', '#ff8fab', "#1982C4")) +
+  scale_fill_manual(values = c('#8AC926', '#FFCA3A', '#6A4C93', '#ff8fab', "#1982C4")) +
   guides(
-    color = guide_legend(nrow = 2),
-    fill = guide_legend(nrow = 2)
+  #  color = guide_legend(nrow = 2),
+  #  fill = guide_legend(nrow = 2)
+    color = guide_legend(nrow = 1),
+    fill = guide_legend(nrow = 1)
   ) +
-  theme(
-    text = element_text(size = 10),
-    plot.title = element_text(face = "bold", size = 14),
-    plot.subtitle = element_text(size = 10),
-    axis.title = element_text(size = 12),
-    axis.text = element_text(size = 10),
-    legend.position = "bottom",
-    legend.title = element_text(size = 10),
-    legend.text = element_text(size = 9))
+  coord_cartesian(clip = "off") +
+  scale_x_discrete(expand = c(0.001, 0.001)) +
+  theme(legend.position = "bottom",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+  text = element_text(size = 30, family = "Times New Roman"), 
+  strip.text = element_text(angle = 0, size = 25), 
+  legend.spacing.y = unit(3, "cm"),
+  legend.box.margin = margin(0, -7, 0, -5),
+  legend.key.height = unit(1.3, "cm"),  
+  strip.background = element_rect(fill = NA, color = NA),
+  axis.text = element_text(size = 30),  
+  #plot.margin = margin(t = 20, r = 40, b = 20, l = 20),
+  plot.margin = margin(t = 20, r = 60, b = 20, l = 20),
+  axis.text.x = (element_text(angle = 45, vjust = 0.5)))
 
-ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/diagnosisyear_graph.tif", plot = f_diagnosisyear, width = 10, height = 8, dpi = 300,  bg = "white")
-
+ggsave(file.path(base_path_cvd, "diagnosisyear_graph.png"), plot = f_diagnosisyear, width = 14, height = 10, dpi = 300,  bg = "white")
 
 
 ```
@@ -1104,7 +1028,7 @@ ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/d
   mutate(`Year of Diagnosis` = case_when(
     `Year of Diagnosis` >= 2004 & `Year of Diagnosis` <= 2009 ~ "2004-2009",
     `Year of Diagnosis` >= 2010 & `Year of Diagnosis` <= 2015 ~ "2010-2015",
-    `Year of Diagnosis` >= 2016 & `Year of Diagnosis` <= 2021 ~ "2016-2021"
+    `Year of Diagnosis` >= 2016 & `Year of Diagnosis` <= 2019 ~ "2016-2019"
   )) %>%
   group_by(race_eth, `Year of Diagnosis`) %>%
   summarise(
@@ -1127,7 +1051,7 @@ us_smr_g_diagnosisyear <- us_smr_diagnosisyear %>%
   mutate(`Year of Diagnosis` = case_when(
    `Year of Diagnosis` >= 2004 & `Year of Diagnosis` <= 2009 ~ "2004-2009",
     `Year of Diagnosis` >= 2010 & `Year of Diagnosis` <= 2015 ~ "2010-2015",
-    `Year of Diagnosis` >= 2016 & `Year of Diagnosis` <= 2021 ~ "2016-2021"
+    `Year of Diagnosis` >= 2016 & `Year of Diagnosis` <= 2019 ~ "2016-2019"
   ),
   Observed = as.numeric(Observed),
   Expected = as.numeric(Expected)) %>%
@@ -1185,22 +1109,22 @@ gt_g_diagnosisyear <- create_gt_table(merged_g_diagnosisyear_wider)
 ```{r grouped_diagnosisyear_graph}
 
 f_g_diagnosisyear <- ggplot(merged_g_diagnosisyear, aes(y = fct_rev(`Year of Diagnosis`), x = as.numeric(SMR))) +
-    geom_point(size = 0.5, position = position_dodge(width = 0.5)) +
+    geom_point(size = 0.5, position = position_dodge(width = 0.5), color = "royalblue4") +
     geom_errorbar(
-        aes(xmin = as.numeric(CI.Lower), xmax = as.numeric(CI.Upper)),
+        aes(xmin = as.numeric(CI.Lower), xmax = as.numeric(CI.Upper)), color = "royalblue4",
         width = 0.2, position = position_dodge(width = 0.5)) +
-    geom_vline(xintercept = 1, linetype = "solid", color = "red", size = 0.2) +
-      geom_text(aes(label = round(`SMR`,1)), vjust = -0.5, size = 3) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 0.5) +
+  geom_text(aes(label = format(round(SMR, 2), nsmall = 2)), vjust = -0.8, size = 3) +
     facet_wrap(~ race_eth, ncol = 2) +
-    theme_bw() +
-    labs(y = "Year of Diagnosis", x = "Standardized Mortality Ratio (SMR) (95% CI)") +
+    jacc_theme() +
+    labs(y = "Year of Diagnosis", x = "SMR") +
     theme(
         strip.background = element_rect(fill = NA, color = NA),
         legend.position = "none",
         panel.spacing = unit(0.5, "lines"))
 
 
-ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/g_deathyear.tif", plot = f_g_diagnosisyear, width = 10, height = 8, dpi = 300,  bg = "white")
+ggsave(file.path(base_path_cvd, "g_deathyear.png"), plot = f_g_diagnosisyear, width = 10, height = 8, dpi = 300,  bg = "white")
 
 ```
 
@@ -1257,7 +1181,7 @@ select(c(Age.at.Diagnosis.recode,
 merged_dx_agegroup <- rbind(pr_smr_dx_agegroup, us_smr_dx_agegroup) %>%
   mutate(across(c(race_eth, "Age at Diagnosis"), as.factor),
          Observed = as.numeric(Observed),
-         across(c(Expected:CI.Upper), ~ format(round(as.numeric(.), 1), nsmall = 1)),
+         across(c(Expected:CI.Upper), ~ format(round(as.numeric(.), 2), nsmall = 2)),
          race_eth = factor(race_eth, levels = c("PR Hispanic", "US Hispanic",
                                                 "White", "Black", "Asian American, Native Hawaiian and other Pacific Islanders"))) %>%
   arrange(race_eth)
@@ -1289,26 +1213,30 @@ gt_dx_agegroup <- create_gt_table(merged_dx_agegroup_wider)
 
 ```{r agegroup_diagnosis_graph}
 
-# Create the ggplot
-f_dx_agegroup <- ggplot(merged_dx_agegroup, aes(x = `race_eth`, y = as.numeric(`SMR`), fill = `race_eth`)) +
-    geom_bar(stat = "identity") + 
-    facet_wrap(~ `Age at Diagnosis`, scales = "fixed") + 
-    labs(
-        x = "Age at Diagnosis",
-        y = "Standardized Mortality Ratio (SMR) (95% CI)",
-        fill = "Race/Ethnicity"
-    ) +
-    theme_minimal() +
-    geom_text(aes(label = `SMR`), vjust = -0.5, size = 3) +  # Add SMR value above each bar
-    theme(plot.title = element_text(face = "bold", hjust = 0.5),
-        axis.text.x = element_blank(),
-        strip.text = element_text(size = 10, face = "bold")) +
-            scale_fill_manual(values = c('#4E86A7', '#6B9F88', '#F1C04A', '#F07F47', '#D08690', '#9E7DB4'),
-                               labels = function(x) str_wrap(x, width = 25)) +
-  scale_y_continuous(
-        breaks = scales::pretty_breaks(n = 6), limits = c(0, 3))
+merged_dx_agegroup$`Age at Diagnosis` <- factor(merged_dx_agegroup$`Age at Diagnosis`,                                                  levels = rev(levels(factor(merged_dx_agegroup$`Age at Diagnosis`))))
 
-ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/agegroup_diagnosis_graph.tif", plot = f_dx_agegroup, width = 10, height = 8, dpi = 300,  bg = "white")
+f_dx_agegroup <- ggplot(merged_dx_agegroup, aes(y = `Age at Diagnosis`, x = as.numeric(SMR))) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 1) +
+  geom_errorbar(aes(xmin = as.numeric(CI.Lower), xmax = as.numeric(CI.Upper)), color = "royalblue4",
+                width = 0.3, linewidth = 1) +
+  geom_point(size = 4, color = "royalblue4") +  
+  geom_text(aes(label = sprintf("%.2f", as.numeric(SMR))), size = 5, vjust = -0.7, fontface = "plain") +
+  facet_wrap(~ race_eth, scales = "free_x", ncol = 3) +
+scale_x_continuous(breaks = scales::breaks_extended(n = 5), expand = expansion(mult = c(0.15, 0.1))) +
+  xlab("SMR") +
+  jacc_theme() +
+  coord_cartesian(clip = "off") +
+  theme(
+  panel.spacing.x = unit(1, "cm"),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  panel.spacing.y = unit(1.25, "cm"),
+  text = element_text(size = 30, family = "Times New Roman"),
+  strip.text = element_text(angle = 0, size = 25, lineheight = 0.7, face = "bold", margin = margin(b = 5)), 
+  strip.background = element_rect(fill = NA, color = NA),
+  axis.text = element_text(size = 20))
+
+ggsave(file.path(base_path_cvd, "agegroup_diagnosis_graph.png"), plot = f_dx_agegroup, width = 10, height = 8, dpi = 300,  bg = "white")
 
 ```
 
@@ -1371,7 +1299,7 @@ select(c(Attained.Age,
 merged_deathyear_agegroup <- rbind(pr_smr_agegroup, us_smr_agegroup) %>%
   mutate(across(c(race_eth, "Age Group"), as.factor),
          Observed = as.numeric(Observed),
-         across(c(Expected:CI.Upper), ~ format(round(as.numeric(.), 1), nsmall = 1)),
+         across(c(Expected:CI.Upper), ~ format(round(as.numeric(.), 1), nsmall = 2)),
          race_eth = factor(race_eth, levels = c("PR Hispanic", "US Hispanic",
                                                 "White", "Black", "Asian American, Native Hawaiian and other Pacific Islanders"))) %>%
   arrange(race_eth)
@@ -1409,10 +1337,10 @@ f_agegroup <- ggplot(merged_deathyear_agegroup, aes(x = `race_eth`, y = as.numer
     facet_wrap(~ `Age Group`, scales = "fixed") + 
     labs(
         x = "Age at Death",
-        y = "Standardized Mortality Ratio (SMR) (95% CI)",
+        y = "SMR",
         fill = "Race/Ethnicity"
     ) +
-    theme_minimal() +
+    jacc_theme() +
     geom_text(aes(label = `SMR`), vjust = -0.5, size = 3) +  # Add SMR value above each bar
     theme(axis.text.x = element_blank(),
         strip.text = element_text(size = 10, face = "bold")) +
@@ -1422,7 +1350,7 @@ f_agegroup <- ggplot(merged_deathyear_agegroup, aes(x = `race_eth`, y = as.numer
         breaks = scales::pretty_breaks(n = 6), limits = c(0, 4))
   
 
-ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/agegroup_deathyear_graph.tif", plot = f_agegroup, width = 10, height = 8, dpi = 300,  bg = "white")
+ggsave(file.path(base_path_cvd, "agegroup_deathyear_graph.png"), plot = f_agegroup, width = 10, height = 8, dpi = 300,  bg = "white")
 
 
 
@@ -1509,7 +1437,7 @@ merged_stage <- merged_stage %>%
 # Widening by Race/Ethnicity
 
 merged_stage_wider <- merged_stage %>%
-  mutate(across(c(Expected:CI.Upper), ~ ifelse(Stage != "Unknown/unstaged", format(round(as.numeric(.), 1), nsmall = 1), "-")),
+  mutate(across(c(Expected:CI.Upper), ~ ifelse(Stage != "Unknown/unstaged", format(round(as.numeric(.), 2), nsmall = 2), "-")),
          "95% CI" = ifelse(Expected != "-",
                            paste0("(", CI.Lower, " - ", CI.Upper, ")"), "-")) %>%
   select(-c(CI.Lower, CI.Upper)) %>%
@@ -1530,21 +1458,28 @@ gt_stage <- create_gt_table(merged_stage_wider)
 ```{r stage_graph}
 
 f_stage <- ggplot(merged_stage[merged_stage$Stage != "Unknown/unstaged",], aes(y = fct_rev(Stage), x = as.numeric(SMR))) +
-  geom_point(size = 0.5, position = position_dodge(width = 0.5)) +
-  geom_errorbar(
-    aes(xmin = as.numeric(CI.Lower), xmax = as.numeric(CI.Upper)),
-    width = 0.2, position = position_dodge(width = 0.5)) +
-  geom_vline(xintercept = 1, linetype = "solid", color = "red", size = 0.2) +
-  geom_text(aes(label = round(as.numeric(`SMR`), 1)), vjust = -0.5, size = 3) +
-  facet_wrap(~ race_eth, ncol = 2) +
-  theme_bw() +
-  labs(y = "Stage at Diagnosis", x = "Standardized Mortality Ratio (SMR) (95% CI)") +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 1) +
+  geom_point(size = 4, position = position_dodge(width = 0.5), color = "royalblue4") +
+  geom_errorbar(aes(xmin = as.numeric(CI.Lower), xmax = as.numeric(CI.Upper)), color = "royalblue4",
+                width = 0.3, linewidth = 1) +
+  geom_text(aes(label = sprintf("%.2f", as.numeric(SMR))), vjust = -1.5, size = 6) +
+  labs(y = "Stage at Diagnosis", x = "SMR") +
+  facet_wrap(~ race_eth, scales = "free_x", ncol = 3) +
+  scale_x_continuous(breaks = scales::breaks_extended(n = 5), expand = expansion(mult = c(0.15, 0.1))) +
+  xlab("SMR") +
+  jacc_theme() +
+  coord_cartesian(clip = "off") +
   theme(
+    panel.spacing.x = unit(1, "cm"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.spacing.y = unit(1.25, "cm"),
+    text = element_text(size = 30, family = "Times New Roman"),
+    strip.text = element_text(angle = 0, size = 25, face = "bold", lineheight = 0.7, margin = margin(b = 5)), 
     strip.background = element_rect(fill = NA, color = NA),
-    legend.position = "none",
-    panel.spacing = unit(0.5, "lines"))
+    axis.text = element_text(size = 20))
 
-ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/us_stage_graph.tif", plot = f_stage, width = 8, height = 6.5, dpi = 1200,  bg = "white")
+ggsave(file.path(base_path_cvd, "us_stage_graph.png"), plot = f_stage, width = 11.5, height = 10, dpi = 300,  bg = "white")
 
 ```
 
@@ -1621,7 +1556,7 @@ merged_procedure <- recode_race_eth(merged_procedure)
 # Widening by Race/Ethnicity
 
 merged_procedure_wider <- merged_procedure %>%
- mutate(across(c(Expected:CI.Upper), ~ format(round(as.numeric(.), 1), nsmall = 1)),
+ mutate(across(c(Expected:CI.Upper), ~ format(round(as.numeric(.), 2), nsmall = 2)),
                  "95% CI" = ifelse(Observed != "<10",
          paste0("(", CI.Lower, " - ", CI.Upper, ")"),
          "-")) %>%
@@ -1638,23 +1573,38 @@ gt_procedure <- create_gt_table(merged_procedure_wider)
 ```
 
 ```{r treatment_graph}
-
-f_treatment <- ggplot(merged_procedure, aes(y = fct_rev(Treatment), x = as.numeric(SMR))) +
-  geom_point(size = 0.5, position = position_dodge(width = 0.5)) +
-  geom_errorbar(
-    aes(xmin = as.numeric(CI.Lower), xmax = as.numeric(CI.Upper)),
-    width = 0.2, position = position_dodge(width = 0.5)) +
-  geom_vline(xintercept = 1, linetype = "solid", color = "red", size = 0.2) +
-  geom_text(aes(label = round(as.numeric(`SMR`),1)), vjust = -0.5, size = 3) +
-  facet_wrap(~ race_eth, ncol = 2) +
-  theme_bw() +
-  labs(y = "Initial Treatment Type", x = "Standardized Mortality Ratio (SMR) (95% CI)") +
+                             
+f_treatment <- ggplot(merged_procedure, aes(
+  y = fct_rev(Treatment), 
+  x = as.numeric(SMR))) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 1) +
+   geom_point(size = 4, color = "royalblue4") +  
+    geom_errorbar(aes(xmin = as.numeric(CI.Lower), xmax = as.numeric(CI.Upper)), color = "royalblue4",
+                  width = 0.3, linewidth = 1) +
+  geom_text(aes(label = format(round(as.numeric(`SMR`), 2), nsmall = 2)), vjust = -0.8, size = 7) +
+ scale_y_discrete(labels = c(
+   "Surgery Only" = "Surgery Only",
+   "Chemotherapy Only" = "Chemotherapy Only",
+   "Radiotherapy Only" = "Radiotherapy Only",
+   "Chemotherapy and Radiotherapy" = "Chemotherapy and\n Radiotherapy",
+   "Other" = "Other")) +
+  facet_wrap(~ race_eth, scales = "free_x", ncol = 3) +
+  scale_x_continuous(breaks = scales::breaks_extended(n = 5), expand = expansion(mult = c(0.15, 0.1))) +
+  xlab("SMR") +
+  ylab("Initial Treatment") +
+  jacc_theme() +
+  coord_cartesian(clip = "off") +
   theme(
+    panel.spacing.x = unit(1, "cm"),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.spacing.y = unit(1.25, "cm"),
+    text = element_text(size = 30, family = "Times New Roman"),
+    strip.text = element_text(angle = 0, size = 25, lineheight = 0.7, family = "Times New Roman", face = "bold", margin = margin(b = 5)), 
     strip.background = element_rect(fill = NA, color = NA),
-    legend.position = "none",
-    panel.spacing = unit(0.5, "lines"))
+    axis.text = element_text(size = 20))
 
-ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/us_treatment_graph.tif", plot = f_treatment, width = 8, height = 6.5, dpi = 1200,  bg = "white")
+ggsave(file.path(base_path_cvd, "us_treatment_graph.png"), plot = f_treatment, width = 11.5, height = 10, dpi = 300,  bg = "white")
 
 ```
 
@@ -1775,17 +1725,17 @@ merged_proc_stage2 <- merged_proc_stage %>%
      Procedure = str_wrap(Procedure, width = 15))
 
 f_proc_stage <- ggplot(merged_proc_stage2[merged_proc_stage2$Procedure != "Other", ], aes(y = Stage, x = as.numeric(SMR))) +
-    geom_point(size = 0.5, position = position_dodge(width = 0.5)) +
-    geom_errorbar(
+    geom_point(size = 0.5, position = position_dodge(width = 0.5), color = "royalblue4") +
+    geom_errorbar(color = "royalblue4",
         aes(xmin = as.numeric(CI.Lower), xmax = as.numeric(CI.Upper)),
         width = 0.2, position = position_dodge(width = 0.5)
     ) +
-    geom_vline(xintercept = 1, linetype = "solid", color = "red", size = 0.2) +
+    geom_vline(xintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 0.5) +
     facet_grid(Procedure ~ race_eth, scales = "fixed", space = "fixed", switch = "y") +
    geom_text(aes(label = round(as.numeric(SMR), 2)), 
             vjust = -1.7, size = 3, fontface = "bold", color = "grey30") +
-  theme_minimal() +
-    labs(y = "", x = "Standardized Mortality Ratio (SMR) (95% CI)") +
+  jacc_theme() +
+    labs(y = "", x = "SMR") +
     theme(
       #  text = element_text(size = 7), 
         strip.text.y = element_text(angle = 0, face = "bold"), #size = 6), 
@@ -1800,7 +1750,7 @@ f_proc_stage <- ggplot(merged_proc_stage2[merged_proc_stage2$Procedure != "Other
         panel.grid = element_blank()) +
   scale_x_continuous(limits = c(-5,10), breaks = c(-5, 1, 5.0, 10))
 
-ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/proc_stage_graph.tif", plot = f_proc_stage, width = 8, height = 6.5, dpi = 1200,  bg = "white")
+ggsave(file.path(base_path_cvd, "proc_stage_graph.png"), plot = f_proc_stage, width = 8, height = 6.5, dpi = 500,  bg = "white")
 
 ```
 
@@ -1853,6 +1803,63 @@ gt_smr_table1 <- combined_table %>%
         style = cell_text(weight = "bold"),
         locations = cells_body(rows = has_na)) %>%
   cols_hide(columns = has_na)
+
+```
+
+```{r cohort_cumulative_mortality}
+
+cancer_plot_data <- cancer_observed %>%
+  mutate(Cohort = case_when(
+    year(DiagnosisDate) >= 2004 & year(DiagnosisDate) <= 2009 ~ "2004–2009",
+    year(DiagnosisDate) >= 2010 & year(DiagnosisDate) <= 2014 ~ "2010–2014",
+    year(DiagnosisDate) >= 2015 & year(DiagnosisDate) <= 2019 ~ "2015–2019"
+  )) %>%
+  filter(!is.na(Cohort), !is.na(Procedure), !is.na(lagTime), !is.na(status)) %>%
+  mutate(
+    Cohort = factor(Cohort, levels = c("2004–2009", "2010–2014", "2015–2019")),
+    Procedure = factor(Procedure, levels = c("Surgery Only","Chemotherapy Only","Radiotherapy Only",            
+                                             "Chemotherapy and Radiotherapy", "Other")))
+
+# Fit survival model
+fit <- survfit(Surv(lagTime, status) ~ Cohort + Procedure, data = cancer_plot_data)
+cuminc <- broom::tidy(fit) %>%
+  mutate(
+    cuminc = 1 - estimate,
+    Cohort = str_extract(strata, "Cohort=\\s*[^,]+") %>% str_remove("Cohort=") %>% str_trim(),
+    Procedure = str_extract(strata, "Procedure=.+") %>% str_remove("Procedure=") %>% str_trim(),
+    Procedure = factor(Procedure, levels = c("Surgery Only","Chemotherapy Only","Radiotherapy Only",            
+                                             "Chemotherapy and Radiotherapy", "Other"))
+  )
+
+# In color
+ggplot(cuminc, aes(x = time, y = cuminc, color = Cohort)) +
+  geom_smooth(se = FALSE, method = "loess", span = 0.3, size = 0.5) +
+  facet_wrap(~ Procedure, ncol = 2) +
+  scale_x_continuous(n.breaks = 10) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    x = "Years Since Diagnosis",
+    y = "Cumulative CVD Mortality",
+    color = "Diagnosis Cohort"
+  ) +
+  jacc_theme() +
+  theme(legend.position = "bottom")
+
+# Black and white
+ggplot(cuminc, aes(x = time, y = cuminc, linetype = Cohort)) +
+  geom_line(size = 0.5, color = "black") +  # black lines with different styles
+  facet_wrap(~ Procedure, ncol = 2) +
+  scale_linetype_manual(
+    values = c("2004–2009" = "dotted", "2010–2014" = "dashed", "2015–2019" = "solid")) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_x_continuous(n.breaks = 10) +
+  labs(
+    x = "Years Since Diagnosis",
+    y = "Cumulative CVD Mortality",
+    linetype = "Diagnosis Cohort"
+  ) +
+  jacc_theme() +
+  theme(legend.position = "bottom")
 
 ```
 
@@ -2070,13 +2077,13 @@ f <- 0
 #cat(paste("\n\n Figure", f + 1, "  Flow diagram defining selection of women diagnosed with first breast cancer between 2004-2019 and followed through 2021 in PR and 17 SEER registries. \n"))
 #f <- f + 1
 
-#image_read("~/Downloads/Statistical Analysis/Outputs/Figures/Flowchart.tif")
+#image_read("~/Downloads/Statistical Analysis/Outputs/Figures/Flowchart.png")
 
 #cat("\n\n\\pagebreak\n")
 
 # PR Table 1
 t <- 0
-cat(paste("\n Table", t + 1, " Baseline Characteristics of women who died in Puerto Rico diagnosed with Breast Cancer from 2004-2019 and followed through 2021 \n"))
+cat(paste("\n Table", t + 1, " Baseline Characteristics of women who died in Puerto Rico diagnosed with Breast Cancer from 2004-2019 and followed through 2021\n"))
 t <- t + 1
 
 gt_pr_table1
@@ -2115,85 +2122,90 @@ cat(paste("\n(To be put in text)\n"))
 
 #f_deathYearCat
 
-#cat("\n\n\\pagebreak\n")
+cat("\n\n\\pagebreak\n")
 
 # PR SMR by diagnosis year
-cat(paste("\n Table", t + 1, " CVD SMRs by Year of Diagnosis for BC Survivors in Puerto Rico Using PR Population as Referent\n"))
+cat(paste("\n Table", t + 1, " CVD SMRs by Year of Diagnosis for BC Survivors in Puerto Rico\n"))
 t <- t + 1
-
 smr_ydiag %>% gt()
 
+cat(paste("\n The SMRs were calculated using Puerto Rico as the referent population.\n"))
 
 # PR SMRs by year of diagnosis figure
-cat(paste("\n Figure", f + 1, " CVD SMRs by Year of Diagnosis for BC survivors in Puerto Rico Using PR population as Referent\n"))
+cat(paste("\n Figure", f + 1, " CVD SMRs by Year of Diagnosis for BC survivors in Puerto Rico\n"))
 f <- f + 1
 
 f_ydiag
+cat(paste("\n The SMRs were calculated using Puerto Rico as the referent population.\n"))
 
 # PR SMRs by year of diagnosis figure
-cat(paste("\n V2: Figure", f + 1, " CVD SMRs by Year of Diagnosis for BC survivors in Puerto Rico Using PR population as Referent\n"))
+cat(paste("\n V2: Figure", f + 1, " CVD SMRs by Year of Diagnosis for BC survivors in Puerto Rico\n"))
 f <- f + 1
 
 f_ydiag2
+cat(paste("\n The SMRs were calculated using Puerto Rico as the referent population.\n"))
 
 cat("\n\n\\pagebreak\n")
 
 # PR SMR by diagnosis year
-cat(paste("\n Table", t + 1, " CVD SMRs by Year of Diagnosis for BC Survivors in Puerto Rico Using PR Population as Referent\n"))
+cat(paste("\n Table", t + 1, " CVD SMRs by Year of Diagnosis for BC Survivors in Puerto Rico\n"))
 t <- t + 1
 
 smr_diagCat %>% gt()
-
+cat(paste("\n The SMRs were calculated using Puerto Rico as the referent population.\n"))
 cat("\n\n\\pagebreak\n")
 
 # PR SMRs by year of diagnosis figure
-cat(paste("\n Figure", f + 1, " CVD SMRs by Year of Diagnosis for BC survivors in Puerto Rico Using PR population as Referent\n"))
+cat(paste("\n Figure", f + 1, " CVD SMRs by Year of Diagnosis for BC survivors in Puerto Rico\n"))
 f <- f + 1
 
 f_ydiagcat
-
+cat(paste("\n The SMRs were calculated using Puerto Rico as the referent population.\n"))
 cat("\n\n\\pagebreak\n")
 
 # PR SMR by agegroup
-cat(paste("\n Table", t + 1, " CVD SMRs by Age at Diagnosis for BC Survivors in Puerto Rico Using PR Population as Referent\n"))
+cat(paste("\n Table", t + 1, " CVD SMRs by Age at Diagnosis for BC Survivors in Puerto Rico\n"))
 t <- t + 1
 
 smr_agegroup %>% gt()
+cat(paste("\n The SMRs were calculated using Puerto Rico as the referent population.\n"))
 
 
 # PR SMRs by agegroup figure
-cat(paste("\n Figure", f + 1, " CVD SMRs by Age at Diagnosis for BC survivors in Puerto Rico Using PR population as Referent\n"))
+cat(paste("\n Figure", f + 1, " CVD SMRs by Age at Diagnosis for BC survivors in Puerto Rico\n"))
 f <- f + 1
 
 f_pragegroup
-
+cat(paste("\n The SMRs were calculated using Puerto Rico as the referent population.\n"))
 cat("\n\n\\pagebreak\n")
 
 # PR SMR by treatment
-cat(paste("\n Table", t + 1, " CVD SMRs by Initial Treatment Type for BC Survivors in Puerto Rico Using PR Population as Referent\n"))
+cat(paste("\n Table", t + 1, " CVD SMRs by Initial Treatment for BC Survivors in Puerto Rico\n"))
 t <- t + 1
 
 smr_treatment %>% gt()
+cat(paste("\n The SMRs were calculated using Puerto Rico as the referent population.\n"))
 
 # PR SMRs by treatment figure
-cat(paste("\n Figure", f + 1, " CVD SMRs by Initial Treatment Type for BC survivors in Puerto Rico Using PR population as Referent\n"))
+cat(paste("\n Figure", f + 1, " CVD SMRs by Initial Treatment for BC survivors in Puerto Rico\n"))
 f <- f + 1
 
 f_prtreatment
-
+cat(paste("\n The SMRs were calculated using Puerto Rico as the referent population.\n"))
 cat("\n\n\\pagebreak\n")
 
 # Overall SMR
-cat(paste("\n Table", t + 1, " CVD SMRs for BC Survivors in PR Hispanic and US Race/Ethnicity Groups Using US Population as Referent\n"))
+cat(paste("\n Table", t + 1, " CVD SMRs for BC Survivors in PR Hispanic and US Race/Ethnicity Groups\n"))
 t <- t + 1
 
 gt_general
-
+cat(paste("\n The SMRs were calculated using the United States, stratified by race and ethnicity, as the referent population.\n"))
 
 # Overall SMR figure
-cat(paste("\n Figure", f + 1, " CVD SMRs for BC survivors in PR Hispanic and US Race/Ethnicity Groups using US population as referent\n"))
+cat(paste("\n Figure", f + 1, " CVD SMRs for BC survivors in PR Hispanic and US Race/Ethnicity Groups\n"))
 f <- f + 1
 f_general
+cat(paste("\n The SMRs were calculated using the United States, stratified by race and ethnicity, as the referent population.\n"))
 
 cat("\n\n\\pagebreak\n")
 
@@ -2230,50 +2242,53 @@ cat("\n\n\\pagebreak\n")
 #cat("\n\n\\pagebreak\n")
 
 # SMRs by year of diagnosis
-cat(paste("\n Table", t + 1, " CVD SMRs by Year of Diagnosis for BC Survivors in PR Hispanic and US Race/Ethnicity Groups Using US population as Referent\n"))
+cat(paste("\n Table", t + 1, " CVD SMRs by Year of Diagnosis for BC Survivors in PR Hispanic and US Race/Ethnicity Groups\n"))
 t <- t + 1
 
 gt_diagnosisyear
+cat(paste("\n The SMRs were calculated using the United States, stratified by race and ethnicity, as the referent population.\n"))
 
 cat("\n\n\\pagebreak\n")
 
 # SMRs by year of diagnosis figure
-cat(paste("\n Figure", f + 1, " CVD SMRs by Year of Diagnosis for BC survivors in PR Hispanic and US Race/Ethnicity Groups Using US population as Referent\n"))
+cat(paste("\n Figure", f + 1, " CVD SMRs by Year of Diagnosis for BC survivors in PR Hispanic and US Race/Ethnicity Groups\n"))
 f <- f + 1
 
 f_diagnosisyear
-
+cat(paste("\n The SMRs were calculated using the United States, stratified by race and ethnicity, as the referent population.\n"))
 cat("\n\n\\pagebreak\n")
 
 # SMRs by grouped year of diagnosis
 
-cat(paste("\n Table", t + 1, " CVD SMRs by Year of Diagnosis for BC Survivors in PR Hispanic and US Race/Ethnicity Groups Using US population as Referent\n"))
+cat(paste("\n Table", t + 1, " CVD SMRs by Year of Diagnosis for BC Survivors in PR Hispanic and US Race/Ethnicity Groups\n"))
 t <- t + 1
 
 gt_g_diagnosisyear
+cat(paste("\n The SMRs were calculated using the United States, stratified by race and ethnicity, as the referent population.\n"))
 
 cat("\n\n\\pagebreak\n")
 
 # SMRs by grouped year of diagnosis figure
-cat(paste("\n Figure", f + 1, " CVD SMRs by Year of Diagnosis for BC survivors in PR Hispanic and US Race/Ethnicity Groups Using US population as Referent\n"))
+cat(paste("\n Figure", f + 1, " CVD SMRs by Year of Diagnosis for BC survivors in PR Hispanic and US Race/Ethnicity Groups\n"))
 f <- f + 1
 
 f_g_diagnosisyear
+cat(paste("\n The SMRs were calculated using the United States, stratified by race and ethnicity, as the referent population.\n"))
 
 cat("\n\n\\pagebreak\n")
 
 # SMRs by age at diagnosis
-cat(paste("\n Table", t + 1, " CVD SMRs by Age at Diagnosis for BC Survivors in PR Hispanic and US Race/Ethnicity Groups Using US population as Referent\n"))
+cat(paste("\n Table", t + 1, " CVD SMRs by Age at Diagnosis for BC Survivors in PR Hispanic and US Race/Ethnicity Groups\n"))
 t <- t + 1
 gt_dx_agegroup
-
+cat(paste("\n The SMRs were calculated using the United States, stratified by race and ethnicity, as the referent population.\n"))
 cat("\n\n\\pagebreak\n")
 
 # SMRs by age at diagnosis figure
-cat(paste("\n Figure", f + 1, " CVD SMRs by Age at Diagnosis for BC survivors in PR Hispanic and US Race/Ethnicity Groups Using US population as Referent\n"))
+cat(paste("\n Figure", f + 1, " CVD SMRs by Age at Diagnosis for BC survivors in PR Hispanic and US Race/Ethnicity Groups\n"))
 f <- f + 1
 f_dx_agegroup
-  
+cat(paste("\n The SMRs were calculated using the United States, stratified by race and ethnicity, as the referent population.\n"))
 cat("\n\n\\pagebreak\n")
 
 # SMRs by age at death
@@ -2291,51 +2306,87 @@ cat("\n\n\\pagebreak\n")
 cat("\n\n\\pagebreak\n")
 
 # SMRs by stage
-cat(paste("\n Table", t + 1, " CVD SMRs by Stage at Diagnosis for BC Survivors in PR Hispanic and US Race/Ethnicity Groups Using US population as Referent\n"))
+cat(paste("\n Table", t + 1, " CVD SMRs by Stage at Diagnosis for BC Survivors in PR Hispanic and US Race/Ethnicity Groups\n"))
 t <- t + 1
 gt_stage
-
+cat(paste("\n The SMRs were calculated using the United States, stratified by race and ethnicity, as the referent population.\n"))
 cat("\n\n\\pagebreak\n")
 
 # SMRs by stage figure
-cat(paste("\n Figure", f + 1, " CVD SMRs by Stage at Diagnosis for BC survivors in PR Hispanic and US Race/Ethnicity Groups Using US population as Referent\n"))
+cat(paste("\n Figure", f + 1, " CVD SMRs by Stage at Diagnosis for BC survivors in PR Hispanic and US Race/Ethnicity Groups\n"))
 f <- f + 1
 f_stage
-
+cat(paste("\n The SMRs were calculated using the United States, stratified by race and ethnicity, as the referent population.\n"))
 cat("\n\n\\pagebreak\n")
 
 # SMRs by initial treatment
-cat(paste("\n Table", t + 1, " CVD SMRs by Initial Treatment for BC Survivors in PR Hispanic and US Race/Ethnicity Groups Using US population as Referent\n"))
+cat(paste("\n Table", t + 1, " CVD SMRs by Initial Treatment for BC Survivors in PR Hispanic and US Race/Ethnicity Groups\n"))
 t <- t + 1
 gt_procedure
-
+cat(paste("\n The SMRs were calculated using the United States, stratified by race and ethnicity, as the referent population.\n"))
 cat("\n\n\\pagebreak\n")
 
 # SMRs by initial treatment figure
-cat(paste("\n Figure", f + 1, " CVD SMRs by Initial Treatment for BC survivors in PR Hispanic and US Race/Ethnicity Groups Using US population as Referent\n"))
+cat(paste("\n Figure", f + 1, " CVD SMRs by Initial Treatment for BC survivors in PR Hispanic and US Race/Ethnicity Groups\n"))
 f <- f + 1
 f_treatment
 
+cat(paste("\n The SMRs were calculated using the United States, stratified by race and ethnicity, as the referent population.\n"))
 cat("\n\n\\pagebreak\n")
 
 # SMRs by treatment and stage
-cat(paste("\n Table", t + 1, " CVD SMRs by Stage and Treatment for BC Survivors in PR Hispanic and US Race/Ethnicity Groups Using US population as Referent\n"))
+cat(paste("\n Table", t + 1, " CVD SMRs by Stage and Treatment for BC Survivors in PR Hispanic and US Race/Ethnicity Groups\n"))
 t <- t + 1
 gt_proc_stage
-
+cat(paste("\n The SMRs were calculated using the United States, stratified by race and ethnicity, as the referent population.\n"))
 cat("\n\n\\pagebreak\n")
 
 # SMRs by treatment and stage figure
-cat(paste("\n Figure", f + 1, " CVD SMRs by Stage and Treatment for BC survivors in PR Hispanic and US Race/Ethnicity Groups Using US population as Referent\n"))
+cat(paste("\n Figure", f + 1, " CVD SMRs by Stage and Treatment for BC survivors in PR Hispanic and US Race/Ethnicity Groups\n"))
 f <- f + 1
 f_proc_stage
-
+cat(paste("\n The SMRs were calculated using the United States, stratified by race and ethnicity, as the referent population.\n"))
 cat("\n\n\\pagebreak\n")
 
 # SMRs Table 1
-cat(paste("\n Table", t + 1, " CVD SMRs for BC Survivors in PR Hispanic and US Race/Ethnicity Groups Using US population as Referent\n"))
+cat(paste("\n Table", t + 1, " CVD SMRs for BC Survivors in PR Hispanic and US Race/Ethnicity Groups\n"))
 t <- t + 1
 gt_smr_table1
+cat(paste("\n The SMRs were calculated using the United States, stratified by race and ethnicity, as the referent population.\n"))
+
+
+cat(paste("\n Table", t + 1, " Population counts for PR Registry and SEER Registries"))
+
+rbind(pr_sir_general, us_sir_general) %>%
+  mutate(race_eth = factor(race_eth, levels = c("PR Hispanic", "US Hispanic", "White", "Black", "AANHPI & AIAN"))) %>%
+  group_by(race_eth) %>%
+  summarise(survivors = sum(Count, na.rm = TRUE),
+            cvd_deaths = sum(Count[`Cause of Death` == "CVD Death"], na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(percentage = survivors / sum(survivors) * 100) %>%
+  add_row(race_eth = "Total", survivors = sum(.$survivors), cvd_deaths = sum(.$cvd_deaths), percentage = 100)
+
+
+# Median follow-up time
+
+round(summary(cancer_observed$FollowUpYears), 2)
+round(summary(cancer_observed[cancer_observed$Vital == "CVD death", ]$FollowUpYears), 2)
+
+us_sir_general_cl_df %>% group_by(Race.Ethnicity.CVD) %>% 
+    summarise(
+        Median = median(FollowUpYears, na.rm = TRUE),
+        iqr = paste0(quantile(FollowUpYears, 0.25, na.rm = TRUE), " - ", quantile(FollowUpYears, 0.75, na.rm = TRUE)),
+        .groups = "drop")
+
+us_sir_general_cl_df %>% 
+  filter(Cause.of.Death.CVD.recode == "CVD") %>%
+  group_by(Race.Ethnicity.CVD) %>% 
+    summarise(
+        Median = round(median(FollowUpYears, na.rm = TRUE), 2),
+        iqr = paste0(round(quantile(FollowUpYears, 0.25, na.rm = TRUE), 2), 
+        " - ", 
+        round(quantile(FollowUpYears, 0.75, na.rm = TRUE),2)),
+        .groups = "drop")
 
 ```
 
@@ -2343,55 +2394,11 @@ gt_smr_table1
 
 Figure legends should be an in-depth explanation of each figure, including a figure TITLE, and a CAPTION that includes the purpose of the figure, and brief method, results, and discussion statements pertaining to the figure. All abbreviations used in the figure should be identified either after their first mention in the legend or in alphabetical order at the end of each legend. All symbols used (arrows, circles, etc.) must be explained. Target length should be 50-100 words per figure.
 
-*	All figures must have a number, title, and caption.
-
-*	Figures should be cited in numerical order in the text.
-
-*	Supplemental figures should be cited as “Online Figure 1, Online Figure 2,” etc.
-
-*	Figure titles should be short and followed by a 2 to 3 sentence caption.
-
-# Figures
-
-*	Figures and graphs should be provided in EPS or TIF format.
-
-*	Color images must be at least 300 DPI. Gray scale images should be at least 300 DPI.
-
-*	All abbreviations used in the figure should be identified in an alphabetical order at the end of each legend.
-
-*	All symbols used (arrows, circles, etc.) must be explained.
-
-*	Figure legends should be typed double-spaced on pages separate from the text.
-
-*	Figure numbers must correspond with the order in which they are mentioned in the text.
-
-*	If previously published figures are used, written permission from the original publisher is required. See STM Guidelines for details: http://www.stm-assoc.org/copyright-legal-affairs/permissions/permissions-guidelines/.
-
-*	If the figure has been previously published, cite the figure source in the legend.
-
 Graphics software, such as Photoshop and Illustrator, should be used to create the art, but not presentation software such as PowerPoint, CorelDraw, or Harvard Graphics. Line art (black and white or color) and combinations of gray scale images and line art should be at least 1200 DPI. Lettering should be of sufficient size to be legible after reduction for publication. The optimal size is 12 points. Symbols should be of a similar size. Figures should be no smaller than 13 cm × 18 cm (500 × 700). Decimals, lines, and other details must be strong enough for reproduction. Use only black and white—not gray—in charts and graphs. Place crop marks on photomicrographs to show only the essential field. Designate special features with arrows. All symbols, arrows, and lettering on half-tone illustrations must contrast with the background. There is no fee for the publication of color figures. Our editors encourage authors to submit figures in color, as we feel it improves the clarity and visual impact of the images.
-
 
 *	Your Central Illustration, if not an existing figure, should be listed first.
 
 *	If the figure has been previously published, cite the figure source in the legend.
-
-*	All abbreviations used in the figure should be identified in alphabetical order at the end of each legend (see also Figures).
-
-# Tables
-
-Each table should be on a separate page, with the table number and title centered above the table and explanatory notes below the table. Use Arabic numbers. Table numbers must correspond with the order cited in the text. Tables should be self-explanatory, and the data presented in them should not be duplicated in the text or figures.
-
-*	All tables must have a title.
-
-*	Abbreviations should be listed in a footnote under the table in alphabetical order.
-
-*	Footnote symbols should appear in the following order: *,†,‡,§,‖,#,**,††, etc.
-
-*	If previously published tables are used, written permission from the original publisher/author is required.
-
-*	Cite the source of the table in the footnote.
-
 
 ```{r forest_plots, include = FALSE}
 
@@ -2526,10 +2533,512 @@ Each table should be on a separate page, with the table number and title centere
 # 
 # forest_figure <- grid.arrange(pr_hispanic_forest, us_hispanic_forest, white_forest, black_forest, aanhpi_forest, ncol = 5, clip = "on")
 # 
-# # knitr::plot_crop("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/pr_hispanic_forest.tif")
+# # knitr::plot_crop("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/pr_hispanic_forest.png")
 # 
-# ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/forest_figure.tif", plot = forest_figure, width = 30, height = 8, dpi = 400,  bg = NULL)
+# ggsave(file.path(base_path_cvd, "forest_figure.png"), plot = forest_figure, width = 30, height = 8, dpi = 400,  bg = NULL)
 # 
 # beepr::beep(1)
 
 ```
+
+```{r hazard_ratios_lag_times}
+
+# Define function to get HR table
+get_hr_table <- function(data, lag_cutoff) {
+  filtered_data <- data %>% filter(lagTime >= lag_cutoff)
+  n <- nrow(filtered_data)
+  
+  if (n == 0) return(NULL)  # Skip empty subsets
+  
+  model <- coxph(Surv(FollowUpYears, status) ~ AgeDx + StageAtDx + Procedure + maritallabel, data = filtered_data)
+  tidy_model <- broom::tidy(model, conf.int = TRUE, exponentiate = TRUE) %>%
+    mutate(lag = paste0(lag_cutoff, "+ years (n = ", comma(n), ")")) %>%
+    select(lag, term, estimate, conf.low, conf.high)
+  
+  return(tidy_model)
+}
+
+# Apply for all lag times and bind results
+results <- purrr::map_dfr(c(3, 5, 7, 10), ~ get_hr_table(cancer_observed, .)) %>%
+  mutate(term = dplyr::recode(term,
+                       "AgeDx" = "Age at Diagnosis",
+                       "StageAtDxRegional" = "Regional",
+                       "StageAtDxDistant" = "Distant",
+                       "StageAtDxUnknown/unstaged" = "Unknown/Unstaged",
+                       "ProcedureChemotherapy Only" = "Chemotherapy Only",
+                       "ProcedureRadiotherapy Only" = "Radiotherapy Only",
+                       "ProcedureChemotherapy and Radiotherapy" = "Chemotherapy & Radiotherapy",
+                       "ProcedureOther" = "Other Procedure",
+                       "maritallabelUnmarried" = "Unmarried")) %>%
+  mutate(across(c(estimate, conf.low, conf.high), ~ ifelse(is.infinite(.x) | .x == 0 | is.na(.x), NA, .x))) %>%
+  mutate(across(c(estimate, conf.low, conf.high), round, 2)) %>%
+  mutate(HR_CI = ifelse(is.na(estimate) | is.na(conf.low) | is.na(conf.high), "-", paste0(estimate, " (", conf.low, ", ", conf.high, ")"))) %>%
+  select(Variable = term, lag, HR_CI) %>%
+  pivot_wider(names_from = lag, values_from = HR_CI) %>%
+  add_row(Variable = "Married", `3+ years (n = 9,706)` = "1.00", `5+ years (n = 6,292)` = "1.00",
+          `7+ years (n = 4,157)` = "1.00",  `10+ years (n = 2,092)` = "1.00", .before = 9) %>%
+  add_row(Variable = "Surgery Only", `3+ years (n = 9,706)` = "1.00", `5+ years (n = 6,292)` = "1.00",
+          `7+ years (n = 4,157)` = "1.00",  `10+ years (n = 2,092)` = "1.00", .before = 5) %>%
+  add_row(Variable = "Localized", `3+ years (n = 9,706)` = "1.00", `5+ years (n = 6,292)` = "1.00",
+          `7+ years (n = 4,157)` = "1.00",  `10+ years (n = 2,092)` = "1.00", .before = 2)
+
+# Create the gt table and format
+hr_gt <- results %>%
+  gt(rowname_col = "Variable") %>%
+  tab_spanner(label = "Hazard Ratios (HR, 95% CI) by Survival Time", columns = starts_with(c("3", "5", "7", "10"))) %>%
+  tab_row_group(label = "Stage at Diagnosis", rows = matches("Localized|Regional|Distant|Unknown")) %>%
+  tab_row_group(label = "Initial Treatment", rows = matches("Surgery|Chemo|Radio|Other")) %>%
+  tab_row_group(label = "Marital Status", rows = matches("Married|Unmarried")) %>%
+  tab_style(style = cell_text(align = "center"), locations = cells_body(columns = everything())) %>%
+  tab_style(style = cell_text(align = "center"), locations = cells_column_labels(columns = everything())) %>%
+  row_group_order(groups = c(NA, "Stage at Diagnosis", "Initial Treatment", "Marital Status"))
+
+#print(hr_gt)
+
+#gtsave(hr_gt, "/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/hr_table.html")
+
+```
+
+```{r hr_graph}
+
+# Reshape the data from wide to long format for plotting
+results_long <- results %>%
+  pivot_longer(cols = starts_with("3") | starts_with("5") | starts_with("7") | starts_with("10"),
+               names_to = "Lag",
+               values_to = "HR_CI") %>%
+ mutate(
+        HR = as.numeric(str_extract(HR_CI, "^[0-9.]+")),  # Extract HR before the first '('
+        CI_Lower = as.numeric(str_extract(HR_CI, "(?<=\\()[0-9.]+(?=,)")),  # Extract lower CI between '(' and ','
+        CI_Upper = as.numeric(str_extract(HR_CI, "(?<=, )[0-9.]+(?=\\))")),
+        Variable = factor(Variable, levels = unique(Variable)),
+        Lag = factor(Lag, levels = c("3+ years (n = 9,706)", "5+ years (n = 6,292)", "7+ years (n = 4,157)", "10+ years (n = 2,092)")))
+
+# Now plot
+f_hr <- ggplot(results_long, aes(x = HR, y = reorder(Variable, desc(Variable)), xmin = CI_Lower, xmax = CI_Upper)) +
+  geom_vline(xintercept = 1, linetype = 2) +
+  geom_errorbarh(height = 0.2, color = "black") + # CI as horizontal error bars
+  geom_point(size = 1.5, color = "#FF3D2E") +  # HR as points
+  labs(x = "Hazard Ratio (HR) and 95% CI", y = "Variable") +
+  jacc_theme() +
+ # scale_x_continuous(limits = c(-1, 20)) +  # Adjust limits for x-axis
+  theme(
+    axis.text.y = element_text(size = 10),
+    axis.text.x = element_text(size = 10),
+    plot.title = element_text(hjust = 0.5)) +
+  facet_wrap(~Lag)
+
+ggsave(file.path(base_path_cvd, "f_hr.png"), plot = f_hr, width = 8, height = 6.5, dpi = 500,  bg = "white")
+
+```
+
+```{r overall_smr_sens}
+
+get_overall_smr <- function(data, lag_cutoff) {
+  # Filter the data based on the lag cutoff
+  filtered_data <- data %>% filter(lagTime >= lag_cutoff)
+  n <- nrow(filtered_data)
+  
+  # Expand data to include required stratifications
+  c <- lexpand(filtered_data,
+               status = cvdStatus != 0, 
+               birth = birth_date,
+               entry = FollowUpStart, 
+               exit = FollowUpEnd, 
+               breaks = list(per = 2004:2022, 
+                             age = c(0, 40, 50, 60, 70, 80, Inf)),
+               aggre = list(agegroup = age, 
+                            deathyear = per))  # Include all here
+  
+  # Call SMR calculation (no stratifier in this case)
+  smr_result <- sir(
+    coh.data = c,
+    coh.obs = 'from0to1',
+    coh.pyrs = 'pyrs',
+    ref.data = gen_2,
+    ref.rate = 'gen_cvd_rate',
+    adjust = c('deathyear', 'agegroup'),
+    test.type = "homogeneity",
+    conf.type = "wald",
+    conf.level = 0.95)
+  
+  # Add a label to track the lag time and number of participants
+  smr_result <- smr_result %>%
+    mutate(lag = paste0(lag_cutoff, "+ years (n = ", comma(n), ")"))
+  
+  return(smr_result)
+}
+
+# Apply the function for different lag_cutoff values
+lag_cutoffs <- c(3, 5, 7, 10)
+
+# Calculate SMR for all lag_cutoffs without stratification
+smr_results_all <- purrr::map_dfr(lag_cutoffs, ~ get_overall_smr(data = cancer_observed, lag_cutoff = .x)) %>%
+  mutate(lag = factor(lag, levels = c("3+ years (n = 9,706)", "5+ years (n = 6,292)", 
+                                      "7+ years (n = 4,157)", "10+ years (n = 2,092)")))
+
+# smr_long <- smr_results_all %>%
+#   pivot_longer(
+#     cols = c(AgeDxCat, Procedure, StageAtDx),
+#     names_to = "Variable",
+#     values_to = "Level",
+#     values_drop_na = TRUE
+#   ) %>%
+#   select(Variable, Level, lag, observed, expected, pyrs, sir, sir.lo, sir.hi, p_value)
+
+# SMR Overall Sensitivity Graph
+
+f_smr_lag <- ggplot(data = smr_results_all, aes(x = lag, y = sir, fill = lag)) +
+  geom_bar(stat = "identity", color = "royalblue4", width = 0.5) +  # Bar plot with black borders and custom width
+  geom_errorbar(aes(ymin = sir.lo, ymax = sir.hi), width = 0.2, color = "black") +  # Add error bars
+  geom_text(aes(label = sprintf("%.2f", sir)), vjust = -0.5, hjust = -0.6, size = 5) +  # Add SMR labels above bars
+  xlab("Survival Time") +
+  ylab("SMR") +
+  scale_fill_manual(values = rep("#d9eaf7", length(unique(smr_agegroup$AgeDxCat)))) + 
+  jacc_theme() +
+  theme(text = element_text(size = 16),
+        axis.title = element_text(face = "bold"),
+        plot.title = element_text(face = "bold", hjust = 0.5),
+        legend.position = "none"); f_smr_lag
+
+ggsave(file.path(base_path_cvd, "smr_pr_lag_graph.png"), plot = f_smr_lag, width = 8, height = 6, dpi = 500,  bg = "white")
+
+```
+
+```{r archived_pr_smr_plots}
+
+# SMRs by year of death
+
+# By year of death
+# smr_deathyear <- sir(coh.data = c, coh.obs = 'from0to1', 
+#                   coh.pyrs = 'pyrs', 
+#                   ref.data = gen_2, 
+#                   ref.rate = 'gen_cvd_rate', 
+#                   adjust = c('deathyear', 'agegroup'), 
+#                   test.type = "homogeneity",
+#                   conf.type = "wald",
+#                   conf.level = 0.95,
+#                   print ='deathyear') %>%
+#     mutate(sir.lo = qchisq(0.05 / 2, df = 2 * observed) / (2 * expected),
+#     sir.hi = qchisq(1 - 0.05 / 2, df = 2 * (observed + 1)) / (2 * expected))
+# 
+# f_prdeathyear <- ggplot(data = smr_deathyear[-1, ], aes(x = deathyear, y = sir)) +
+#   geom_line(color = "royalblue4", size = 1.2) +  # Adjust line color and thickness
+#   geom_point(size = 3, shape = 21, fill = "white", color = "royalblue4") +  # Add points with fill
+#   geom_ribbon(aes(ymin = sir.lo, ymax = sir.hi), fill = "royalblue4", alpha = 0.1) +  # Confidence interval with fill color
+#   geom_hline(yintercept = 1, color = "#FF3D2E", linetype = "dashed", size = 0.5) +  # #FF3D2E dashed line at SMR = 1
+#   geom_text(aes(label = round(sir, 2)), nudge_y = 0.7, nudge_x = -0.1, size = 4, color = "black") +  # Add labels with a slight upward offset
+#   xlab("Year of Death") +
+#   ylab("SMR") +
+#   scale_x_continuous(breaks = smr_deathyear$deathyear) +
+#   scale_y_continuous(breaks = seq(1, ceiling(max(smr_deathyear[-1, ]$sir.hi, na.rm = TRUE)), by = 2), limits = c(0, NA)) +
+#   theme(
+#     axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+# SMRs by grouped year of death
+
+# smr_deathYearCat <- smr_deathyear %>%
+#   mutate(`Year of Death` = case_when(
+#     deathyear >= 2005 & deathyear <= 2010 ~ "2005-2010",
+#     deathyear >= 2011 & deathyear <= 2016 ~ "2011-2016",
+#     deathyear >= 2017 & deathyear <= 2021 ~ "2017-2021"
+#   )) %>%
+#   group_by(`Year of Death`) %>%
+#   summarise(
+#     Observed = sum(observed),
+#     Expected = sum(expected),
+#     .groups = "drop"
+#   ) %>%
+#   mutate(SMR = Observed / Expected,
+#          CI.Lower = ifelse(
+#            Observed == 0, 0, 
+#            qchisq(0.05 / 2, df = 2 * Observed) / (2 * Expected)
+#          ),
+#          CI.Upper =  ifelse(
+#            Observed == 0, Inf, 
+#            qchisq(1 - 0.05 / 2, df = 2 * (Observed + 1)) / (2 * Expected))
+#          )
+# 
+# f_deathYearCat <- ggplot(data = smr_deathYearCat, aes(y = fct_rev(`Year of Death`), x = SMR, group = 1)) +
+#   geom_errorbarh(aes(xmin = CI.Lower, xmax = CI.Upper), height = 0.2, color = "royalblue4") +  # Horizontal error bars
+#   geom_vline(xintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 0.5) +  # Reference line at SMR = 1
+#     geom_point(size = 4, color = "royalblue4") +
+#   xlab("SMR") +
+#   geom_text(aes(label = round(SMR, 2)), nudge_y = 0.1, size = 4, color = "black") +
+#   scale_y_discrete(limits = rev(levels(smr_deathYearCat$`Year of Death`))) +
+#   scale_x_continuous(
+#   breaks = scales::pretty_breaks(n = 6), 
+#   limits = c(.5, NA)) +
+#   ylab("Year of Death") +
+#   jacc_theme()
+
+# f_ydiag2 <- ggplot(data = smr_ydiag, aes(x = `Year of Diagnosis`, y = `Standardized Mortality Ratio (SMR)`)) +
+#   geom_errorbar(aes(ymin = `Lower 95% CI`, ymax = `Upper 95% CI`), 
+#                 width = 0.2, color = "royalblue4") +
+#   geom_point(size = 2, color = "royalblue4") +
+#   geom_hline(yintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 0.5) +  # Reference line at SMR = 1
+#   ylab("SMR") +
+#   xlab("Year of Diagnosis") +
+#   scale_x_continuous(breaks = sort(unique(smr_ydiag$`Year of Diagnosis`))) +
+#    scale_y_continuous(breaks = seq(1, max(smr_ydiag$`Upper 95% CI`, na.rm = TRUE), by = 2), limits = c(1, NA)) +
+#   theme_bw(base_size = 14) +
+#   theme(
+#     axis.title = element_text(face = "bold"),
+#     axis.text.x = element_text(face = "bold", angle = 45),
+#     plot.title = element_text(face = "bold", hjust = 0.5)
+#   )
+
+
+# SMRs by grouped year of diagnosis
+
+# smr_diagCat <- smr_ydiag %>%
+#   mutate(`Year of Diagnosis` = case_when(
+#     `Year of Diagnosis` >= 2004 & `Year of Diagnosis` <= 2009 ~ "2004-2009",
+#     `Year of Diagnosis` >= 2010 & `Year of Diagnosis` <= 2014 ~ "2010-2014",
+#     `Year of Diagnosis` >= 2015 & `Year of Diagnosis` <= 2019 ~ "2015-2019"
+#   )) %>%
+#   group_by(`Year of Diagnosis`) %>%
+#   summarise(
+#     Observed = sum(Observed),
+#     Expected = sum(Expected),
+#     .groups = "drop"
+#   ) %>%
+#   mutate(SMR = Observed / Expected,
+#          CI.Lower = ifelse(
+#            Observed == 0, 0, 
+#            qchisq(0.05 / 2, df = 2 * Observed) / (2 * Expected)
+#          ),
+#          CI.Upper =  ifelse(
+#            Observed == 0, Inf, 
+#            qchisq(1 - 0.05 / 2, df = 2 * (Observed + 1)) / (2 * Expected))
+#          ) %>%
+#   mutate(across(c(Expected, SMR, CI.Lower, CI.Upper), ~ round(.x, 2)))
+
+
+# f_ydiagcat <- ggplot(data = smr_diagCat, aes(x = `Year of Diagnosis`, y = SMR, group = 1)) +
+#   geom_ribbon(aes(ymin = CI.Lower, ymax = CI.Upper), fill = "royalblue4", alpha = 0.2) +
+#   geom_line(color = "royalblue4", size = 1) +
+#   geom_point(size = 4, color = "royalblue4") +
+#   scale_x_discrete(expand = expansion(add = c(0.05, 0.05))) +
+#   geom_text(aes(label = round(SMR, 2)), nudge_y = 0.5, size = 4, color = "black") +
+#   geom_hline(yintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 0.5) +
+#   xlab("Year of Diagnosis") +
+#   ylab("SMR") +
+#   jacc_theme() +
+#   theme(plot.margin = unit(c(1, 1, 1, 1), "cm"), text = element_text(family = "Times New Roman"))
+
+# By comorbidity status
+
+# smr_comorb <- sir(coh.data = c, coh.obs = 'from0to1',
+#                 coh.pyrs = 'pyrs',
+#                 ref.data = gen_2,
+#                 ref.rate = 'gen_cvd_rate',
+#                 adjust = c('deathyear', 'agegroup'),
+#                 test.type = "homogeneity",
+#                 conf.type = "wald",
+#                 conf.level = 0.95,
+#                 print ='Comorbidity') %>%
+#     mutate(sir.lo = qchisq(0.05 / 2, df = 2 * observed) / (2 * expected),
+#     sir.hi = qchisq(1 - 0.05 / 2, df = 2 * (observed + 1)) / (2 * expected))
+# 
+# f_comorb <- ggplot(data = smr_comorb, aes(x = sir, y = fct_rev(Comorbidity))) +
+#   geom_errorbarh(aes(xmin = sir.lo, xmax = sir.hi), height = 0.2, color = "royalblue4") +  # Horizontal error bars
+#   geom_point(size = 4, color = "royalblue4") +  # Blue points for SMR
+#   geom_vline(xintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 0.5) +  # Reference line at SMR = 1
+#   geom_text(aes(label = sprintf("%.2f", sir)), vjust = -0.8, size = 5) +  # Add SMR labels above bars
+#   xlab("SMR") +
+#   scale_y_discrete(name = "Number of comorbidities") +  # Discrete scale for y-axis
+#   scale_x_continuous(breaks = seq(1, max(smr_comorb$sir.hi, na.rm = TRUE), by = 2), limits = c(1, NA)) +  # Breaks start at 1
+#   theme_bw(base_size = 16) +
+#   theme(
+#     axis.title = element_text(face = "bold"),
+#     axis.text.y = element_text(face = "bold"),  # Bold y-axis labels
+#     plot.title = element_text(face = "bold", hjust = 0.5)
+#   )
+# 
+# ggsave(file.path(base_path_cvd, "pr_comorb.png"), plot = f_comorb, width = 11, height = 6, dpi = 300,  bg = "white")
+
+```
+
+```{r sensitivity_analysis_smr_lag_times}
+
+cancer_observed <- cancer_observed %>%
+  mutate(AgeDxCatRecode = case_when(
+    AgeDx < 65 ~ "<65",
+    AgeDx >= 65 ~ "65+"
+  ))
+
+get_smr_table <- function(data, lag_cutoff, stratifier) {
+  filtered_data <- data %>% filter(lagTime >= lag_cutoff)
+  n <- nrow(filtered_data)
+  
+  c <- lexpand(filtered_data,
+               status = cvdStatus != 0, 
+               birth = birth_date,
+               entry = FollowUpStart, 
+               exit = FollowUpEnd, 
+               breaks = list(per = 2004:2022, 
+                             age = c(0, 40, 50, 60, 70, 80, Inf)),
+               aggre = list(agegroup = age, 
+                            deathyear = per, 
+                            ydiag, 
+                            AgeDxCatRecode, 
+                            yearDiagCat, 
+                            deathYearCat, 
+                            Comorb.cat, 
+                            Comorbidity, 
+                            maritallabel, 
+                            Procedure,
+                            StageAtDx))  # Include all here
+  
+  smr_result <- sir(
+    coh.data = c,
+    coh.obs = 'from0to1',
+    coh.pyrs = 'pyrs',
+    ref.data = gen_2,
+    ref.rate = 'gen_cvd_rate',
+    adjust = c('deathyear', 'agegroup'),
+    test.type = "homogeneity",
+    conf.type = "univariate",
+    conf.level = 0.95,
+    print = stratifier  # <-- dynamic now
+  ) %>%  
+    mutate(sir.lo = qchisq(0.05 / 2, df = 2 * observed) / (2 * expected),
+                sir.hi = qchisq(1 - 0.05 / 2, df = 2 * (observed + 1)) / (2 * expected))
+  
+  smr_result <- smr_result %>%
+    mutate(lag = paste0(lag_cutoff, "+ years (n = ", comma(n), ")"),
+           Stratifier = stratifier)  # track stratifier
+  return(smr_result)
+}
+
+combo_grid <- expand_grid(
+  lag_cutoff = c(3, 5, 7, 10),
+  stratifier = c("AgeDxCatRecode", "Procedure", "StageAtDx"),
+)
+
+# Apply the function across all combinations
+smr_results_all <- purrr::pmap_dfr(combo_grid, ~ get_smr_table(data = cancer_observed, lag_cutoff = ..1, stratifier = ..2))
+
+smr_sensitivity <- smr_results_all %>%
+  pivot_longer(
+    cols = c(AgeDxCatRecode, Procedure, StageAtDx),
+    names_to = "Variable",
+    values_to = "Level",
+    values_drop_na = TRUE) %>%
+  mutate(
+    Variable = factor(Variable, levels = unique(Variable)),
+    Level = ifelse(Level == "Unknown/unstaged", "Unknown/ unstaged", Level),
+    Level = case_when(
+      Variable == "StageAtDx" ~ factor(Level, levels = c("Localized", "Regional", "Distant", "Unknown/ unstaged")),
+      TRUE ~ as.factor(Level)),
+    lag = factor(lag, levels = c("3+ years (n = 9,706)", "5+ years (n = 6,292)",
+                                 "7+ years (n = 4,157)", "10+ years (n = 2,092)"))) %>%
+  select(Variable, Level, lag, observed, expected, pyrs, sir, sir.lo, sir.hi, p_value) %>% group_by(lag) %>%
+  mutate(sir = ifelse(observed < 10, NA, sir),
+         sir.lo = ifelse(observed < 10, NA, sir.lo),
+         sir.hi = ifelse(observed < 10, NA, sir.hi))
+
+rm(smr_results_all)
+
+f_pr_agedx_lag <- ggplot(data = smr_sensitivity[smr_sensitivity$Variable == "AgeDxCatRecode", ], aes(x = Level, y = sir, fill = Level)) +
+  facet_wrap(~lag) +
+  geom_bar(stat = "identity", color = "royalblue4", width = 0.5) +  # Bar plot with black borders and custom width
+  geom_errorbar(aes(ymin = sir.lo, ymax = sir.hi), width = 0.2, color = "black") +  # Add error bars
+  geom_text(aes(label = sprintf("%.2f", sir)), vjust = -0.5, hjust = -0.5, size = 3) +  # Add SMR labels above bars
+  xlab("Age at Diagnosis") +
+  ylab("SMR") +
+  scale_fill_manual(values = rep("#d9eaf7", length(unique(smr_agegroup$AgeDxCat)))) + 
+  jacc_theme() +
+  theme(text = element_text(size = 16),
+    axis.title = element_text(face = "bold"),
+    axis.text.x = element_text(hjust = 1),  # Rotate x-axis labels
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "none"  # Remove legend if not needed
+  ); f_pr_agedx_lag
+
+ggsave(file.path(base_path_cvd, "smr_agedx_lag_graph2.png"), plot = f_pr_agedx_lag, width = 8, height = 6.5, dpi = 500,  bg = "white")
+
+f_pr_treatment_lag <- ggplot(
+  data = smr_sensitivity[smr_sensitivity$Variable == "Procedure", ],
+  aes(x = reorder(str_wrap(Level, width = 10), desc(str_wrap(Level, width = 10))), y = sir, fill = Level)) +
+  facet_wrap(~lag) +
+  geom_bar(stat = "identity", color = "royalblue4", width = 0.5) +
+  geom_errorbar(aes(ymin = sir.lo, ymax = sir.hi), width = 0.2, color = "black") +
+  geom_text(aes(label = sprintf("%.2f", sir)), vjust = -0.5, nudge_x = .2, size = 3) +
+  xlab("Initial Treatment") +
+  ylab("SMR") +
+  scale_fill_manual(values = rep("#d9eaf7", length(unique(smr_agegroup$AgeDxCat)))) +
+  coord_cartesian(clip = "off") +
+  jacc_theme() +
+  theme(
+    text = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 7),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "none",
+    plot.margin = margin(t = 10, r = 10, b = 30, l = 10)
+  ); f_pr_treatment_lag
+
+ggsave(file.path(base_path_cvd, "smr_treatment_lag_graph.png"), plot = f_pr_treatment_lag, width = 8, height = 6.5, dpi = 500,  bg = "white")
+
+
+lag_stage <- smr_sensitivity %>%
+  filter(Variable == "StageAtDx",
+         Level != "Unknown/ unstaged") %>%
+  mutate(Level = factor(str_wrap(Level, width = 12), 
+                           levels = str_wrap(c("Localized", "Regional", "Distant"), width = 12)))
+
+f_pr_stagedx_lag <- ggplot(
+  data = lag_stage %>%
+    filter(Variable == "StageAtDx" & !(Level == "Distant" & lag == "10+ years (n = 2,092)")),
+  aes(x = Level, y = sir, fill = Level)) +
+  facet_wrap(~lag) +
+  geom_bar(stat = "identity", color = "royalblue4", width = 0.5) +
+  geom_errorbar(aes(ymin = sir.lo, ymax = sir.hi), width = 0.2, color = "black") +
+  geom_text(aes(label = sprintf("%.2f", sir)), vjust = -0.5, hjust = -0.5, size = 3) +
+   labs(
+        x = "Stage at Diagnosis",
+        y = "SMR",
+        caption = "There were 10 distant stage CVD deaths for the whole period.") +
+  scale_fill_manual(values = rep("#d9eaf7", 4)) +
+  jacc_theme() +
+  theme(
+    text = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    axis.text.x = element_text(size = 7),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "none"); f_pr_stagedx_lag
+
+
+ggsave(file.path(base_path_cvd, "smr_stage_lag_graph.png"), plot = f_pr_stagedx_lag, width = 8, height = 6.5, dpi = 500,  bg = "white")
+
+```
+
+```{r p_heterogeneity}
+
+
+stratify_by <- "age_group"
+
+data_clean <- merged_dx_agegroup %>%
+  filter(Observed != "<10") %>%
+  mutate(observed_deaths = as.numeric(Observed),
+         expected_deaths = as.numeric(gsub("[^0-9.]", "", Expected)),
+         race_ethnicity = factor(race_eth),
+         age_group = factor(`Age at Diagnosis`)) %>%
+  filter(!is.na(observed_deaths) & !is.na(expected_deaths))
+
+{results <- data.frame()
+for(s in unique(data_clean[[stratify_by]])) {
+  d <- data_clean %>% filter(.data[[stratify_by]] == s)
+  p <- anova(glm(observed_deaths ~ 1 + offset(log(expected_deaths)), family = poisson, data = d),
+             glm(observed_deaths ~ race_ethnicity + offset(log(expected_deaths)), family = poisson, data = d),
+             test = "LRT")$`Pr(>Chi)`[2]
+  results <- rbind(results, data.frame(Stratum = s, P_heterogeneity = ifelse(p < 0.001, "< 0.001", sprintf("%.2f", p))))
+}
+  
+
+print(results)
+}
+
+```
+

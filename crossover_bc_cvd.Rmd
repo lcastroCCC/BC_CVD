@@ -1,0 +1,660 @@
+---
+title: "Crossover"
+author: "Génesis Rodríguez Ortiz"
+date: "`r format(Sys.time(), '%b %d, %Y - %I:%M %p')`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libraries, include = FALSE, cache = FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, cache = FALSE, warning = FALSE, message = FALSE, results = "asis")
+
+library(readxl)
+library(dplyr)
+library(mgcv)
+library(ggplot2)
+library(openxlsx)
+library(popEpi) # SMR analysis
+library(Epi) 
+library(data.table)  
+library(lubridate)
+library(beepr) # sounds for R
+library(stringr)
+library(tidyr)
+library(gtsummary)
+library(gt) # for creating gt tables
+library(webshot) # for saving images as png
+library(survival) # for cumulative mortality km curves
+library(forcats)
+library(scales) # commas for numbers
+library(survminer) #for ggsurvplot graphs
+library(magick) # for tif file management
+library(forestploter) # for forest plots
+library(gridExtra) # joining forest plots
+library(broom)
+library(purrr)
+library(splines)
+library(patchwork)
+library(ggsurvfit)
+
+```
+
+```{r functions}
+
+# Changing label of other race/ethnicity
+
+recode_race_eth <- function(df) {
+  df <- df %>%
+    mutate(race_eth = case_when(
+      race_eth == "Asian American, Native Hawaiian and other Pacific Islanders" ~ "AANHPI & AIAN",
+      TRUE ~ as.character(race_eth)
+    )) %>%
+    mutate(race_eth = factor(race_eth, levels = c("PR Hispanic", "US Hispanic",
+                                                "White", "Black", "AANHPI & AIAN")))
+  return(df)
+}
+
+name_columns <- function(df) {
+  race_ethnicity_pattern <- "_(White|Black|AANHPI & AIAN|US Hispanic|PR Hispanic)"
+  
+  setNames(
+    str_replace_all(
+      str_remove(colnames(df), race_ethnicity_pattern),
+      c("Observed" = "O", "Expected" = "E")
+    ),
+    colnames(df)
+  )
+}
+
+
+create_gt_table <- function(df, groupname_col = NULL) {
+  if (!is.null(groupname_col)) {
+    table <- df |> 
+      gt(groupname_col = groupname_col)
+  } else {
+    table <- df |> 
+      gt()
+  }
+  
+  table <- table |> 
+    spanners_and_header() |> 
+    cols_label(.list = desired_colnames) |> 
+    tab_style(
+      style = cell_text(weight = "bold"),
+      locations = cells_row_groups()) |> 
+    cols_align(align = "center", columns = everything()) |> 
+    tab_options(table.font.size = px(6)) |>
+    tab_source_note(
+      source_note = "SMRs were calculated as the observed number of cardiovascular disease deaths among breast cancer patients divided by the expected number of cardiovascular disease deaths in the race- and ethnic-matched general female U.S. population. SMR calculations for results with <10 events were suppressed. \n
+      AANHPI, Asian American, Native Hawaiian, and Pacific Islander; 
+      AIAN, American Indian and Alaska Native;
+      CVD: cardiovascular disease; 
+      E = Expected; 
+      O = Observed;
+      SMR = Standardized Mortality Ratio."
+    )
+  
+  return(table)
+}
+
+
+# Creating column names
+
+spanners_and_header <- function(gt_tbl) {
+  gt_tbl |> 
+    tab_spanner(label = md('**White**'), columns = contains('White')) |> 
+    tab_spanner(label = md('**Black**'), columns = contains('Black')) |> 
+    tab_spanner(label = md('**AANHPI & AIAN**'), columns = contains('AANHPI & AIAN')) |> 
+    tab_spanner(label = md('**US Hispanic**'), columns = contains('US Hispanic')) |> 
+    tab_spanner(label = md('**PR Hispanic**'), columns = contains('PR Hispanic'))
+}
+
+# For quality control section: sums observations for each SEER*Stat table
+
+sum_observed_columns <- function(df) {
+  df %>%
+    mutate(across(starts_with("Observed"), ~ as.numeric(gsub("<10", NA, .)))) %>%
+    summarize(across(starts_with("Observed"), sum, na.rm = TRUE))
+}
+
+```
+
+```{r cancer_data}
+
+# Cleansed cancer data
+
+cancer <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_cleansed.csv")
+}, error = function(e) {
+  read.csv("~/Downloads/Registro Central de Cancer/cancer_cleansed.csv")
+}, error = function(e) {
+  read.csv("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_cleansed.csv")
+}))
+cancer <- cancer %>%
+  mutate(FollowUpStart = as.Date(FollowUpStart),
+         DiagnosisDate = as.Date(DiagnosisDate),
+         FollowUpEnd = as.Date(FollowUpEnd),
+         maritallabel = str_to_title(ifelse(maritallabel == "unknown",
+                               NA,
+                               maritallabel)),
+         Comorb.cat = factor(ifelse(Comorb == '0' , 'No', 
+                             ifelse(as.numeric(Comorb) >= 1, 'Yes', 'Unknown')),
+                             levels= c('Yes','No','Unknown')),
+    Procedure = factor(Procedure,
+                               levels = c("Surgery Only", "Chemotherapy Only",
+                                          "Radiotherapy Only", "Chemotherapy and Radiotherapy",
+                                          "Other")),
+    Comorbidity = case_when(
+    Comorb == -1 ~ NA_character_,
+    Comorb == 0 ~ "0",
+    Comorb == 1 ~ "1",
+    Comorb == 2 ~ "2",
+    Comorb >= 3 ~ "3+"
+  ),
+   StageAtDx = factor(StageAtDx,
+                   levels = c("Localized", "Regional", "Distant", "Unstaged"),
+                   labels = c("Localized", "Regional", "Distant", "Unknown/unstaged")))
+
+cancer_observed <- cancer %>%
+  filter(FollowUpYears > 0)
+
+cancer_observed$HealthRegion <- str_to_title(cancer_observed$HealthRegion)
+cancer_observed$HealthRegion <- factor(cancer_observed$HealthRegion,
+                            levels = c('Noreste Metro','Central Bayamon','Oeste Aguadilla/Mayaguez',
+                                       'Sureste Caguas','Sur Ponce',"Norte Arecibo",
+                                       'Este Fajardo','County Unknown'
+                                       ))
+
+```
+
+```{r crossover}
+
+cancer_long <- cancer_observed %>%
+  filter(Vital %in% c("BC death", "CVD death")) %>%
+  mutate(
+    person_time = FollowUpYears,
+    cause = case_when(
+      Vital == "BC death" ~ "BC",
+      Vital == "CVD death" ~ "CVD"
+    ),
+    event = 1
+  ) %>%
+  select(EncryptedID, person_time, FollowUpYears, cause, event, StageAtDx) %>%
+  bind_rows(
+    cancer_observed %>%
+      filter(Vital %in% c("BC death", "CVD death")) %>%
+      mutate(
+        person_time = FollowUpYears,
+        cause = case_when(
+          Vital == "BC death" ~ "CVD",
+          Vital == "CVD death" ~ "BC"
+        ),
+        event = 0
+      ) %>%
+      select(EncryptedID, person_time, FollowUpYears, cause, event, StageAtDx))
+
+# STEP 2: Function to fit model, predict, and extract crossover
+analyze_stage <- function(stage_label, data) {
+  dat <- data %>%
+    filter(StageAtDx == stage_label | stage_label == "Overall") %>%
+    filter(!is.na(FollowUpYears)) 
+  
+  model <- glm(event ~ cause * ns(FollowUpYears, df = 4),
+               family = poisson(link = "log"),
+               offset = log(person_time),
+               data = dat)
+  
+  pred_grid <- expand_grid(
+    FollowUpYears = seq(0.1, max(dat$FollowUpYears, na.rm = TRUE), by = 0.1),
+    cause = c("BC", "CVD")
+  ) %>%
+    mutate(person_time = 1) 
+  
+  pred <- predict(model, newdata = pred_grid, type = "link", se.fit = TRUE)
+  
+  pred_grid <- pred_grid %>%
+    mutate(
+      fit = pred$fit,
+      se = pred$se.fit,
+      lower = exp(fit - 1.96 * se) * 1000,
+      upper = exp(fit + 1.96 * se) * 1000,
+      rate = exp(fit) * 1000
+    )
+  
+  wide_pred <- pred_grid %>%
+    select(FollowUpYears, cause, rate) %>%
+    pivot_wider(names_from = cause, values_from = rate) %>%
+    mutate(diff = BC - CVD,
+           sign_change = sign(diff) != lag(sign(diff)))
+  
+  crossover_time <- wide_pred %>%
+    filter(sign_change) %>%
+    slice(1) %>%
+    pull(FollowUpYears)
+  
+  list(stage = stage_label, model = model, preds = pred_grid, crossover = crossover_time)
+}
+
+# STEP 3: Fit and plot overall first
+overall_result <- analyze_stage(stage_label = "Overall", data = cancer_long)
+
+# Plot overall
+ggplot(overall_result$preds, aes(x = FollowUpYears, y = rate, color = cause)) +
+  geom_line(size = 0.2) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = cause), alpha = 0.1, color = NA) +
+  theme_minimal() +
+  labs(
+    title = "BC and CVD death rates in Puerto Rico",
+    y = "Death rate per 1,000 person-years",
+    x = "Follow-up time (years)",
+    subtitle = ifelse(is.na(overall_result$crossover), "No crossover time",
+                      paste0("Crossover time = ", round(overall_result$crossover, 1), " years"))
+  ) +
+  scale_color_manual(values = c("CVD" = "red", "BC" = "black")) +
+  scale_fill_manual(values = c("CVD" = "red", "BC" = "black")) +
+  scale_y_continuous(limits = c(0,1000)) +
+  scale_x_continuous(limits = c(1, max(overall_result$preds$FollowUpYears))) +
+  theme(legend.position = "none")
+
+
+ggplot(overall_result$preds, aes(x = FollowUpYears, y = rate, color = cause)) +
+  geom_line(size = 0.2) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = cause), alpha = 0.1, color = NA) +
+  theme_minimal() +
+  labs(
+    title = "BC and CVD death rates in Puerto Rico",
+    y = "Death rate per 1,000 person-years (Log scale)",
+    x = "Follow-up time (years)",
+    subtitle = ifelse(is.na(overall_result$crossover), "No crossover time",
+                      paste0("Crossover time = ", round(overall_result$crossover, 1), " years"))
+  ) +
+  scale_color_manual(values = c("CVD" = "red", "BC" = "black")) +
+  scale_fill_manual(values = c("CVD" = "red", "BC" = "black")) +
+  scale_y_log10() +
+  scale_x_continuous(limits = c(0.25, max(overall_result$preds$FollowUpYears))) +
+  theme(legend.position = "none")
+
+# STEP 4: Apply by stage, excluding "Unknown/unstaged"
+stage_levels <- c("Localized", "Regional", "Distant")
+results_list <- map(stage_levels, ~ analyze_stage(.x, cancer_long))
+
+# STEP 5: Plot per stage
+plots <- map(results_list, function(res) {
+  ggplot(res$preds, aes(x = FollowUpYears, y = rate, color = cause)) +
+    geom_line(size = 0.2) +
+    geom_ribbon(aes(ymin = lower, ymax = upper, fill = cause), alpha = 0.1, color = NA) +
+    theme_minimal() +
+    labs(
+      fill = "Cause of Death",
+      color = "Cause of Death",
+      title = paste("Stage", res$stage),
+      y = "Death rate per 1,000 person-years",
+      x = "Follow-up time (years)",
+      subtitle = ifelse(is.na(res$crossover), "No crossover time",
+                        paste0("Crossover time = ", round(res$crossover, 1), " years"))
+    ) +
+    scale_color_manual(values = c("CVD" = "red", "BC" = "black")) +
+    scale_fill_manual(values = c("CVD" = "red", "BC" = "black")) +
+    scale_x_continuous(limits = c(1, max(res$preds$FollowUpYears))) +
+    scale_y_continuous(limits = c(0, 1000))
+}); wrap_plots(plots, ncol = 2, scales = "free_y") +
+  plot_layout(guides = "collect", axis_titles = "collect") & theme(legend.position = "bottom")
+
+# Log tranformed version by stage
+plots_log <- map(results_list, function(res) {
+  ggplot(res$preds, aes(x = FollowUpYears, y = rate, color = cause)) +
+    geom_line(size = 0.2) +
+    geom_ribbon(aes(ymin = lower, ymax = upper, fill = cause), alpha = 0.1, color = NA) +
+    theme_minimal() +
+    labs(
+      fill = "Cause of Death",
+      color = "Cause of Death",
+      title = paste("Stage", res$stage),
+      y = "Death rate per 1,000 person-years (Log scale)",
+      x = "Follow-up time (years)",
+      subtitle = ifelse(is.na(res$crossover), "No crossover time",
+                        paste0("Crossover time = ", round(res$crossover, 1), " years"))
+    ) +
+    scale_color_manual(values = c("CVD" = "red", "BC" = "black")) +
+    scale_fill_manual(values = c("CVD" = "red", "BC" = "black")) +
+    scale_x_continuous(limits = c(1, max(res$preds$FollowUpYears))) +
+    scale_y_log10()
+}); wrap_plots(plots_log, ncol = 2, guides = "collect") + plot_layout(guides = "collect", axis_titles = "collect") & theme(legend.position = "bottom")
+
+
+
+```
+
+```{r competing_risks}
+# We calculate CIFs with Fine-Gray method for competing risks
+cancer_observed <- cancer_observed %>% mutate(
+    statusV = ifelse(Vital == 'CVD death' ,1,
+                     ifelse(Vital == 'BC death' , 2, 
+           ifelse(Vital == 'Other Death', 3, 0))),
+    statusV = as.factor(statusV))
+
+options("ggsurvfit.switch-color-linetype" = TRUE)
+tidycmprsk::cuminc(Surv(FollowUpYears, statusV) ~ 1, cancer_observed) %>%
+  ggcuminc(outcome = c("1", "2", "3"))+
+  scale_ggsurvfit() +
+  labs(x = "Survival Time (Years)",
+       title = "Cumulative Incidence Functions for Cause-Specific Mortality") +
+  add_confidence_interval(show.legend = FALSE) +
+  scale_fill_manual(values = c("1" = "red", "2" = "pink", "3" = "black")) +
+  scale_color_manual(values = c("red", "pink", "black"), labels = c("1" = "Cardiac Death", "2"  = "BC Death", "3" = "Other Causes of Death"))
+
+tidycmprsk::cuminc(Surv(FollowUpYears, statusV) ~ 1, cancer_observed) %>%
+  ggcuminc(outcome = c("1", "3"))+
+  scale_ggsurvfit(x_scales = list(limits = c(0, 17))) +
+  labs(x = "Survival Time (Years)",
+              title = "Cumulative Incidence Functions for Cause-Specific Mortality") +
+  add_confidence_interval(show.legend = FALSE) +
+  scale_fill_manual(values = c("1" = "red", "3" = "black")) +
+  scale_color_manual(values = c("red", "black"), labels = c("1" = "CVD Death", "3" = "Other Causes of Death"))
+
+tidycmprsk::cuminc(Surv(FollowUpYears, statusV) ~ 1, cancer_observed %>% filter(FollowUpYears >= 10)) %>%
+  ggcuminc(outcome = c("1", "2", "3"))+
+  scale_ggsurvfit(x_scales = list(limits = c(10, 17))) +
+  labs(x = "Survival Time (Years)", title = "CIF for patients who were followed up for 10+ years") +
+  add_confidence_interval(show.legend = FALSE) +
+  scale_fill_manual(values = c("1" = "red", "2" = "pink", "3" = "black")) +
+  scale_color_manual(values = c("red", "pink", "black"), labels = c("1" = "Cardiac Death", "2"  = "BC Death", "3" = "Other Causes of Death"))
+
+tidycmprsk::cuminc(Surv(FollowUpYears, statusV) ~ 1, cancer_observed %>% filter(AgeDx >= 80)) %>%
+  ggcuminc(outcome = c("1","2", "3"))+
+  scale_ggsurvfit(x_scales = list(limits = c(0, 16.5))) +
+  labs(x = "Survival Time (Years)", title = "Cumulative Incidence Functions for Cause-Specific Mortality - 80+ years") +
+  add_confidence_interval(show.legend = FALSE) +
+   scale_fill_manual(values = c("1" = "red", "2" = "pink", "3" = "black")) +
+  scale_color_manual(values = c("red", "pink", "black"), labels = c("1" = "Cardiac Death", "2"  = "BC Death", "3" = "Other Causes of Death"))
+
+
+tidycmprsk::cuminc(Surv(FollowUpYears, statusV) ~ StageAtDx, data = cancer_observed %>% filter(StageAtDx != "Unknown/unstaged")) %>%
+  tidy() %>%
+  mutate(StageAtDx = sub("^(.*?)\\s.*", "\\1", strata),
+         StageAtDx = factor(StageAtDx, levels = c("Localized", "Regional", "Distant"))) %>%
+  ggplot(aes(x = time, y = estimate, color = outcome, fill = outcome)) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.15, color = NA) +
+  geom_line(size = 0.8) +
+  facet_wrap(~ StageAtDx, labeller = label_wrap_gen(width = 15)) +
+  scale_color_manual(values = c("1" = "red", "2" = "pink", "3" = "black"),
+                     labels = c("1" = "CVD Death", "2" = "BC Death", "3" = "Other Causes of Death")) +
+  scale_fill_manual(values = c("1" = "red", "2" = "pink", "3" = "black"),
+                    labels = c("1" = "CVD Death", "2" = "BC Death", "3" = "Other Causes of Death")) +
+  labs(x = "Survival Time (Years)", y = "Cumulative Incidence",
+       title = "Cumulative Incidence Functions for Cause-Specific Mortality\n by Stage at Diagnosis") +
+  theme_minimal() +
+  theme(strip.text = element_text(face = "bold"),
+        legend.position = "bottom") +
+  guides(color = guide_legend(title = "Cause of Death"),
+         fill = guide_legend(title = "Cause of Death"))
+
+
+cancer_observed <- cancer_observed %>%
+  mutate(TreatmentGroup = case_when(
+    Surgery == "Yes" & Radiotherapy == "Yes" & Chemotherapy == "No" ~ "Surgery + Radiation",
+    Surgery == "Yes" & Radiotherapy == "No" & Chemotherapy == "Yes" ~ "Surgery + Chemo",
+    Surgery == "Yes" & Radiotherapy == "No" & Chemotherapy == "No" ~ "Surgery Only",
+    Surgery == "Yes" & Radiotherapy == "Yes" & Chemotherapy == "Yes" ~ "Surgery + Both",
+    Surgery == "No" ~ "No Surgery"),
+  CardiotoxicGroup = case_when(
+      Radiotherapy == "No" & Chemotherapy == "No" ~ "Non-Cardiotoxic",
+      xor(Radiotherapy == "Yes", Chemotherapy == "Yes") ~ "1 Cardiotoxic Treatment",
+      Radiotherapy == "Yes" & Chemotherapy == "Yes" ~ "2 Cardiotoxic Treatments"),
+    AgeGroup = if_else(AgeDx < 80, "<80", "80+"),
+    FacetGroup = paste(AgeGroup, TreatmentGroup, sep = " - ")
+  )
+
+tidycmprsk::cuminc(Surv(FollowUpYears, statusV) ~ TreatmentGroup, data = cancer_observed) %>%
+  tidycmprsk::tidy(conf.int = TRUE) %>%
+  ggplot(aes(x = time, y = estimate, color = outcome, fill = outcome)) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.15, color = NA) +
+  geom_line(size = 0.8) +
+  facet_wrap(~ strata, labeller = label_wrap_gen(width = 15)) +
+  scale_color_manual(values = c("1" = "red", "2" = "pink", "3" = "black"),
+                     labels = c("1" = "CVD Death", "2" = "BC Death", "3" = "Other Causes of Death")) +
+  scale_fill_manual(values = c("1" = "red", "2" = "pink", "3" = "black"),
+                    labels = c("1" = "CVD Death", "2" = "BC Death", "3" = "Other Causes of Death")) +
+  labs(x = "Survival Time (Years)", y = "Cumulative Incidence",
+       title = "Cumulative Incidence Functions for Cause-Specific Mortality by Initial Treatment Type") +
+  theme_minimal() +
+  theme(strip.text = element_text(face = "bold"),
+        legend.position = "bottom") +
+  guides(color = guide_legend(title = "Cause of Death"),
+         fill = guide_legend(title = "Cause of Death"))
+
+# tidycmprsk::cuminc(Surv(FollowUpYears, statusV) ~ FacetGroup, data = cancer_observed) %>%
+#   tidycmprsk::tidy(conf.int = TRUE) %>%
+#   ggplot(aes(x = time, y = estimate, color = outcome, fill = outcome)) +
+#   geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.15, color = NA) +
+#   geom_line(size = 0.8) +
+#   facet_wrap(~ strata, labeller = label_wrap_gen(width = 15)) +
+#   scale_color_manual(values = c("1" = "red", "2" = "pink", "3" = "black"),
+#                      labels = c("1" = "CVD Death", "2" = "BC Death", "3" = "Other Causes of Death")) +
+#   scale_fill_manual(values = c("1" = "red", "2" = "pink", "3" = "black"),
+#                     labels = c("1" = "CVD Death", "2" = "BC Death", "3" = "Other Causes of Death")) +
+#   labs(x = "Survival Time (Years)", y = "Cumulative Incidence",
+#        title = "Cumulative Incidence by Initial Treatment Type") +
+#   theme_minimal(base_size = 14) +
+#   theme(strip.text = element_text(face = "bold"),
+#         legend.position = "bottom") +
+#   guides(color = guide_legend(title = "Cause of Death"),
+#          fill = guide_legend(title = "Cause of Death"))
+
+ cancer_observed <- cancer_observed %>%
+   mutate(CardiotoxicGroup = case_when(
+       xor(Radiotherapy == "Yes", Chemotherapy == "Yes") ~ "1 Cardiotoxic Treatment",
+       Radiotherapy == "Yes" & Chemotherapy == "Yes" ~ "2 Cardiotoxic Treatments",
+       TRUE ~ "Non-Cardiotoxic"),
+     AgeGroup = if_else(AgeDx < 80, "18-79", "80+"),
+     FacetGroup = paste(AgeGroup, CardiotoxicGroup, sep = " - "))
+
+cancer_filtered <- cancer_observed %>%
+  mutate(
+    AgeGroup = ifelse(AgeDx < 80, "18-79", "80+"),
+    strata = interaction(CardiotoxicGroup, AgeGroup, sep = "_")
+  )
+
+# Run cuminc
+cuminc_data <- tidycmprsk::cuminc(Surv(FollowUpYears, statusV) ~ strata, data = cancer_filtered) %>%
+  tidy() %>%
+  mutate(
+    CardiotoxicGroup = factor(sub("^(.*?)_.*", "\\1", strata), levels = c("Non-Cardiotoxic", "1 Cardiotoxic Treatment", "2 Cardiotoxic Treatments")),
+    AgeGroup = factor(sub(".*?_(.*)", "\\1", strata), levels = c("18-79", "80+"))
+  )
+
+# Plot
+ggplot(cuminc_data, aes(x = time, y = estimate, color = outcome, fill = outcome)) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.15, color = NA) +
+  geom_line(size = 0.8) +
+  facet_grid(AgeGroup ~ CardiotoxicGroup) +
+  scale_color_manual(values = c("1" = "red", "2" = "pink", "3" = "black"),
+                     labels = c("1" = "CVD Death", "2" = "BC Death", "3" = "Other Causes of Death")) +
+  scale_fill_manual(values = c("1" = "red", "2" = "pink", "3" = "black"),
+                    labels = c("1" = "CVD Death", "2" = "BC Death", "3" = "Other Causes of Death")) +
+  labs(x = "Survival Time (Years)", y = "Cumulative Incidence",
+       title = "Cumulative Incidence Functions for Cause-Specific Mortality \nby Initial Treatment Type and Age") +
+  theme_minimal() +
+  theme(strip.text = element_text(face = "bold"), legend.position = "bottom") +
+  guides(color = guide_legend(title = "Cause of Death"),
+         fill = guide_legend(title = "Cause of Death"))
+
+
+```
+
+```{r }
+
+us_sir_general_cl_df <- read.delim2("~/Downloads/Statistical Analysis/Inputs/sir_general_case_listing.txt") %>%
+  mutate(Survival.months = as.numeric(Survival.months),
+         FollowUpYears = round((Survival.months - 12) / 12, 2),
+         cvdStatus = ifelse(Cause.of.Death.CVD.recode == "CVD", 1, 0),
+         FollowUpYears = ifelse(FollowUpYears < 0.08, 0.08, FollowUpYears)) %>%
+  filter(Event.Number == "Index Record",
+         Race.Ethnicity.CVD != " ")
+
+summary(us_sir_general_cl_df$FollowUpYears)
+
+us_long <- us_sir_general_cl_df %>%
+  filter(COD.to.site.recode %in% c("Breast", "Cerebrovascular Diseases", "Diseases of Heart", "Other Diseases of Arteries, Arterioles, Capillaries","Aortic Aneurysm and Dissection", "Atherosclerosis")) %>%
+  mutate(
+    person_time = FollowUpYears,
+    cause = case_when(
+      COD.to.site.recode == "Breast" ~ "BC",
+      COD.to.site.recode %in% c("Cerebrovascular Diseases", "Diseases of Heart", "Other Diseases of Arteries, Arterioles, Capillaries","Aortic Aneurysm and Dissection", "Atherosclerosis") ~ "CVD"
+    ),
+    event = 1
+  ) %>%
+  select(Patient.ID, person_time, FollowUpYears, COD.to.site.recode, cause, event, Combined.Summary.Stage..2004.., Race.Ethnicity.CVD) %>%
+  bind_rows(
+  us_sir_general_cl_df %>%
+    filter(COD.to.site.recode %in% c("Breast", cvd_causes)) %>%
+    mutate(
+      person_time = FollowUpYears,
+      cause = case_when(
+        COD.to.site.recode == "Breast" ~ "CVD",  # switch cause
+        COD.to.site.recode %in% cvd_causes ~ "BC"
+      ),
+      event = 0
+    ) %>%
+    select(Patient.ID, person_time, FollowUpYears, COD.to.site.recode, cause, event, Combined.Summary.Stage..2004.., Race.Ethnicity.CVD)
+)
+
+# STEP 2: Function to fit model, predict, and extract crossover
+analyze_stage_race <- function(stage_label, race_group, data) {
+  dat <- data %>%
+    filter((Combined.Summary.Stage..2004.. == stage_label | stage_label == "Overall"),
+           Race.Ethnicity.CVD == race_group,
+           !is.na(FollowUpYears))
+
+  model <- glm(event ~ cause * ns(FollowUpYears, df = 4),
+               family = poisson(link = "log"),
+               offset = log(person_time),
+               data = dat)
+  
+  pred_grid <- expand_grid(
+    FollowUpYears = seq(0.1, max(dat$FollowUpYears, na.rm = TRUE), by = 0.1),
+    cause = c("BC", "CVD")
+  ) %>%
+    mutate(person_time = 1) 
+  
+  pred <- predict(model, newdata = pred_grid, type = "link", se.fit = TRUE)
+  
+  pred_grid <- pred_grid %>%
+    mutate(
+      fit = pred$fit,
+      se = pred$se.fit,
+      lower = exp(fit - 1.96 * se) * 1000,
+      upper = exp(fit + 1.96 * se) * 1000,
+      rate = exp(fit) * 1000
+    )
+  
+  wide_pred <- pred_grid %>%
+    select(FollowUpYears, cause, rate) %>%
+    pivot_wider(names_from = cause, values_from = rate) %>%
+    mutate(diff = BC - CVD,
+           sign_change = sign(diff) != lag(sign(diff)))
+  
+  crossover_time <- wide_pred %>%
+    filter(sign_change) %>%
+    slice(1) %>%
+    pull(FollowUpYears)
+  
+  list(stage = stage_label, model = model, preds = pred_grid, crossover = crossover_time)
+}
+
+# STEP 3: Fit and plot overall first
+overall_result <- analyze_stage(stage_label = "Overall", data = us_long)
+
+# Plot overall
+ggplot(overall_result$preds, aes(x = FollowUpYears, y = rate, color = cause)) +
+  geom_line(size = 0.2) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = cause), alpha = 0.1, color = NA) +
+  theme_minimal() +
+  labs(
+    title = "BC and CVD death rates in the US",
+    y = "Death rate per 1,000 person-years",
+    x = "Follow-up time (years)",
+    subtitle = ifelse(is.na(overall_result$crossover), "No crossover time",
+                      paste0("Crossover time = ", round(overall_result$crossover, 1), " years"))
+  ) +
+  scale_color_manual(values = c("CVD" = "red", "BC" = "black")) +
+  scale_fill_manual(values = c("CVD" = "red", "BC" = "black")) +
+  scale_y_continuous(limits = c(0,1000)) +
+  scale_x_continuous(limits = c(1, max(overall_result$preds$FollowUpYears))) +
+  theme(legend.position = "none")
+
+
+ggplot(overall_result$preds, aes(x = FollowUpYears, y = rate, color = cause)) +
+  geom_line(size = 0.2) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = cause), alpha = 0.1, color = NA) +
+  theme_minimal() +
+  labs(
+    title = "BC and CVD death rates in the US",
+    y = "Death rate per 1,000 person-years (Log scale)",
+    x = "Follow-up time (years)",
+    subtitle = ifelse(is.na(overall_result$crossover), "No crossover time",
+                      paste0("Crossover time = ", round(overall_result$crossover, 1), " years"))
+  ) +
+  scale_color_manual(values = c("CVD" = "red", "BC" = "black")) +
+  scale_fill_manual(values = c("CVD" = "red", "BC" = "black")) +
+  scale_y_log10() +
+  scale_x_continuous(limits = c(0.25, max(overall_result$preds$FollowUpYears))) +
+  theme(legend.position = "none")
+
+# STEP 4: Apply by stage, excluding "Unknown/unstaged"
+stage_levels <- c("Localized", "Regional", "Distant")
+results_list <- map(stage_levels, ~ analyze_stage(.x, us_long))
+
+race_groups <- unique(us_long$Race.Ethnicity.CVD)
+stage_levels <- c("Localized", "Regional", "Distant")
+
+results_by_race <- cross_df(list(stage = stage_levels, race = race_groups)) %>%
+  mutate(result = map2(stage, race, ~ analyze_stage_race(.x, .y, us_long)))
+
+
+# STEP 5: Plot per stage
+plots <- map(results_list, function(res) {
+  ggplot(res$preds, aes(x = FollowUpYears, y = rate, color = cause)) +
+    geom_line(size = 0.2) +
+    geom_ribbon(aes(ymin = lower, ymax = upper, fill = cause), alpha = 0.1, color = NA) +
+    theme_minimal() +
+    labs(
+      fill = "Cause of Death",
+      color = "Cause of Death",
+      title = paste("Stage", res$stage),
+      y = "Death rate per 1,000 person-years",
+      x = "Follow-up time (years)",
+      subtitle = ifelse(is.na(res$crossover), "No crossover time",
+                        paste0("Crossover time = ", round(res$crossover, 1), " years"))
+    ) +
+    scale_color_manual(values = c("CVD" = "red", "BC" = "black")) +
+    scale_fill_manual(values = c("CVD" = "red", "BC" = "black")) +
+    scale_x_continuous(limits = c(1, max(res$preds$FollowUpYears))) +
+    scale_y_continuous(limits = c(0, 1000))
+}); wrap_plots(plots, ncol = 2, scales = "free_y") +
+  plot_layout(guides = "collect", axis_titles = "collect") & theme(legend.position = "bottom")
+
+# Log tranformed version by stage
+plots_log <- map(results_list, function(res) {
+  ggplot(res$preds, aes(x = FollowUpYears, y = rate, color = cause)) +
+    geom_line(size = 0.2) +
+    geom_ribbon(aes(ymin = lower, ymax = upper, fill = cause), alpha = 0.1, color = NA) +
+    theme_minimal() +
+    labs(
+      fill = "Cause of Death",
+      color = "Cause of Death",
+      title = paste("Stage", res$stage),
+      y = "Death rate per 1,000 person-years (Log scale)",
+      x = "Follow-up time (years)",
+      subtitle = ifelse(is.na(res$crossover), "No crossover time",
+                        paste0("Crossover time = ", round(res$crossover, 1), " years"))
+    ) +
+    scale_color_manual(values = c("CVD" = "red", "BC" = "black")) +
+    scale_fill_manual(values = c("CVD" = "red", "BC" = "black")) +
+    scale_x_continuous(limits = c(1, max(res$preds$FollowUpYears))) +
+    scale_y_log10()
+}); wrap_plots(plots_log, ncol = 2, guides = "collect") + plot_layout(guides = "collect", axis_titles = "collect") & theme(legend.position = "bottom")
+
+```

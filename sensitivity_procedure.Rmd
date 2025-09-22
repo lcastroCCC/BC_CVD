@@ -1,0 +1,327 @@
+---
+title: "Treatment sensitivity analysis"
+author: "Génesis Rodríguez Ortiz"
+date: "2025-07-21"
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+```{r libraries, include = FALSE, cache = FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, cache = TRUE, warning = FALSE, message = FALSE, results = "asis")
+
+library(readxl)
+library(dplyr)
+library(mgcv)
+library(ggplot2)
+library(openxlsx)
+library(popEpi) # SMR analysis
+library(Epi) 
+library(data.table)  
+library(lubridate)
+library(beepr) # sounds for R
+library(stringr)
+library(tidyr)
+library(gtsummary)
+library(gt) # for creating gt tables
+library(webshot) # for saving images as png
+library(survival) # for cumulative mortality km curves
+library(forcats)
+library(scales) # commas for numbers
+library(survminer) #for ggsurvplot graphs
+library(magick) # for tif file management
+library(forestploter) # for forest plots
+library(gridExtra) # joining forest plots
+library(broom)
+library(purrr)
+library(showtext)
+library(janitor)
+library(knitr)
+showtext_auto()
+
+jacc_theme <- function() {
+ theme_bw(base_size = 16) +
+ theme(strip.background = element_blank(),
+ plot.title = element_text(face = "bold", hjust = 0.5))
+
+}
+
+```
+
+```{r, include = FALSE}
+
+# Population file
+
+gen_2 <- suppressWarnings(tryCatch({
+  read.csv("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Defunciones/cvm_rate_gen_pop2.csv")
+}, error = function(e) {
+  read.csv("~/Downloads/NCHS/cvm_rate_gen_pop2.csv")
+}))
+gen_2 <- as.data.table(gen_2)
+setnames(gen_2, old = c("current_data_year", "AgeDeathCat2"), new = c("deathyear", "agegroup"))
+gen_2 <- gen_2[, .(agegroup, deathyear, n, Population, gen_cvd_rate)]
+gen_2[, agegroup := ifelse(agegroup == "80+", "80", 
+                           ifelse(agegroup == "18-39", "0", 
+                                  sub("([0-9]+)-([0-9]+)", "\\1", agegroup)))]
+gen_2[, agegroup := as.numeric(agegroup)]
+gen_2[, gen_cvd_rate := gen_cvd_rate / 1000]
+
+
+# Cancer file
+
+paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_registry_20240924.csv",
+           "~/Downloads/Registro Central de Cancer/cancer_registry_20240924.csv",
+           paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_registry_20240924.csv"))
+
+# Attempt to read the file
+cancer.raw <- suppressWarnings(tryCatch({
+  read.csv(paths[1])
+}, error = function(e) {
+  read.csv(paths[2])
+}, error = function(e) {
+  read.csv(paths[3])
+}))
+
+cancer <- cancer.raw %>% 
+  mutate(AgeDx = as.numeric(cancer.raw$AgeDx),
+         AgeDx = ifelse(AgeDx == 999, NA, AgeDx),
+         birth_date = ydiag - AgeDx,
+         AgeFollowUpStart = AgeDx + 1,   
+         AgeDeath = ifelse(VitalStatus == 0,
+                           AgeDx + (yy_dlc - ydiag), NA),
+         mm_dx = ifelse(is.na(mm_dx), 6, mm_dx),
+         mm_dlc = ifelse(is.na(mm_dlc), 6, mm_dlc),
+         DiagnosisDate = make_date(year = ydiag, month = mm_dx, day = 2),
+         yearDiagCat = cut(ydiag, 
+                           breaks = c(2003, 2009, 2014, 2019), 
+                           labels = c("2004-2009", "2010-2014", "2015-2019"),
+                           right = TRUE),
+         deathYearCat = case_when(
+           VitalStatus == 0 & yy_dlc <= 2021 ~ cut(yy_dlc, 
+                                                   breaks = c(2003, 2009, 2015, 2021, 2024), 
+                                                   labels = c("2004-2009", "2010-2015", "2016-2021", "2022-2024"),
+                                                   right = TRUE),
+           TRUE ~ NA_character_),
+         FollowUpStart = DiagnosisDate %m+% years(1),
+         FollowUpEnd = if_else(yy_dlc > 2021, as.Date("2021-12-31"), make_date(year = yy_dlc, month = mm_dlc, day = 2)),
+         FollowUpYears = if_else(FollowUpEnd < FollowUpStart, 0, 
+                                 as.numeric(difftime(FollowUpEnd, FollowUpStart, units = "days")) / 365.25),
+         AgeDeathCat2 = as.factor(case_when(AgeDeath >= 18 & AgeDeath <= 39 ~ "18-39",
+                                            AgeDeath >= 40 & AgeDeath <= 49 ~ "40-49",
+                                            AgeDeath >= 50 & AgeDeath <= 59 ~ "50-59",
+                                            AgeDeath >= 60 & AgeDeath <= 69 ~ "60-69",
+                                            AgeDeath >= 70 & AgeDeath <= 79 ~ "70-79",
+                                            AgeDeath >= 80 ~ "80+",
+                                            TRUE ~ NA)),
+         cvdStatus = ifelse(VitalStatus == 0 & CVDDeathCause == "CVD death", 1, 0),
+         Vital = as.factor(ifelse(VitalStatus == 0 & CVDDeathCause == 'CVD death','CVD death',
+                                  ifelse(VitalStatus == 0 & BCDeathCause == 'BC death', 'BC death',
+                                         ifelse(VitalStatus == 0, 'Other Death', 'Alive'
+                                         )))),
+         SurvivalTime = ifelse(VitalStatus == 1, NA,
+                               ifelse(VitalStatus == 0 & FollowUpYears > 0,
+                                      FollowUpYears, 0)),
+         DxCity = str_to_title(DxCity)) %>%
+  select(EncryptedID, 
+         mm_dx, ydiag, DiagnosisDate, FollowUpStart, AgeDx, birth_date, AgeFollowUpStart, 
+         mm_dlc, yy_dlc, FollowUpEnd, FollowUpYears, AgeDeath, FollowUpYears,
+         AgeDeathCat2, Vital, cvdStatus, yearDiagCat, deathYearCat, SurvivalTime, maritallabel, StageAtDx, Surgery, Radiotherapy, Chemotherapy,
+         Comorb, DxCounty, DxCity, HealthRegion) %>%
+  mutate(Procedure_No_Unknown = case_when(
+    Surgery == "Yes" & Chemotherapy %in% c("No", "Unk") & Radiotherapy %in% c("No", "Unk") ~ "Surgery Only",
+    Radiotherapy == "Yes" & Chemotherapy %in% c("No", "Unk") ~ "Radiotherapy Only",
+    Chemotherapy == "Yes" & Radiotherapy %in% c("No", "Unk") ~ "Chemotherapy Only",
+    Chemotherapy == "Yes" & Radiotherapy == "Yes" ~ "Chemotherapy and Radiotherapy",
+    TRUE ~ "Other"),
+    Procedure_No = case_when(
+      Surgery == "Yes" & Chemotherapy == "No" & Radiotherapy == "No" ~ "Surgery Only",
+      Chemotherapy == "No" & Radiotherapy == "Yes" ~ "Radiotherapy Only",
+      Chemotherapy == "Yes" & Radiotherapy == "No" ~ "Chemotherapy Only",
+      Chemotherapy == "Yes" & Radiotherapy == "Yes" ~ "Chemotherapy and Radiotherapy",
+      TRUE ~ "Other"),
+    Procedure_NA = case_when(
+      Surgery == "Unk" | Chemotherapy == "Unk" | Radiotherapy == "Unk" ~ NA_character_,
+      Surgery == "Yes" & Chemotherapy == "No" & Radiotherapy == "No" ~ "Surgery Only",
+      Chemotherapy == "No" & Radiotherapy == "Yes" ~ "Radiotherapy Only",
+      Chemotherapy == "Yes" & Radiotherapy == "No" ~ "Chemotherapy Only",
+      Chemotherapy == "Yes" & Radiotherapy == "Yes" ~ "Chemotherapy and Radiotherapy",
+      TRUE ~ "Other"),
+    Procedure_No_Unknown = factor(Procedure_No_Unknown, levels = c("Surgery Only", "Chemotherapy Only", "Radiotherapy Only",
+                                                                   "Chemotherapy and Radiotherapy", "Other")),
+    Procedure_No = factor(Procedure_No, levels = c("Surgery Only", "Chemotherapy Only", "Radiotherapy Only", 
+                                                   "Chemotherapy and Radiotherapy", "Other")),
+    Procedure_NA = factor(Procedure_NA, levels = c("Surgery Only", "Chemotherapy Only", "Radiotherapy Only",
+                                                   "Chemotherapy and Radiotherapy", "Other")))
+
+# Persons observed | 17,183
+cancer_observed <- cancer %>%
+  filter(FollowUpYears > 0) 
+```
+
+Logics used:
+
+1.    People with missing treatment information were eliminated from analysis of Procedure
+      Procedure_NA = case_when(
+      Surgery == "Unk" | Chemotherapy == "Unk" | Radiotherapy == "Unk" ~ NA_character_,
+      Surgery == "Yes" & Chemotherapy == "No" & Radiotherapy == "No" ~ "Surgery Only",
+      Chemotherapy == "No" & Radiotherapy == "Yes" ~ "Radiotherapy Only",
+      Chemotherapy == "Yes" & Radiotherapy == "No" ~ "Chemotherapy Only",
+      Chemotherapy == "Yes" & Radiotherapy == "Yes" ~ "Chemotherapy and Radiotherapy",
+      TRUE ~ "Other")
+    
+
+```{r NA, echo = FALSE}
+
+# SMR Calculation
+
+c <- lexpand(cancer_observed, status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = FollowUpStart, # Without those that did not meet follow-up
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(0, 40, 50, 60, 70, 80, Inf)),
+             aggre = list(agegroup = age, deathyear = per, Procedure_NA))
+
+
+smr_treatment <- sir(coh.data = c, coh.obs = 'from0to1',
+                     coh.pyrs = 'pyrs',
+                     ref.data = gen_2,
+                     ref.rate = 'gen_cvd_rate',
+                     adjust = c('deathyear', 'agegroup'),
+                     test.type = "homogeneity",
+                     conf.type = "wald",
+                     conf.level = 0.95,
+                     print ='Procedure_NA') %>%
+  mutate(sir.lo = qchisq(0.05 / 2, df = 2 * observed) / (2 * expected),
+         sir.hi = qchisq(1 - 0.05 / 2, df = 2 * (observed + 1)) / (2 * expected))
+tabyl(cancer_observed$Procedure_NA, show_na = TRUE, show_missing_levels = T) %>%
+  kable()
+
+# Graph
+
+ggplot(data = smr_treatment[smr_treatment$observed >= 10,], aes(x = Procedure_NA, y = sir, fill = Procedure_NA)) +
+  geom_bar(stat = "identity", color = "royalblue4", width = 0.5) +  # Bar plot with black borders and custom width
+  geom_errorbar(aes(ymin = sir.lo, ymax = sir.hi), width = 0.2, color = "royalblue4") +  # Add error bars
+  geom_text(aes(label = sprintf("%.2f", sir)), vjust = -0.5, hjust = -0.4, size = 4) +  # Add SMR labels above bars
+  geom_hline(yintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 0.5) +
+  xlab("Initial Treatment") +
+  ylab("SMR") +
+  labs(title = "SMRs by Initial Treatment - Removing Unknown answer to treatments from analysis. \n
+       n = 17,430 - 5,481. Final sample is 11,949",
+       caption = "Other not shown due to suppression SMR calculations for results with <10 events.") +
+  scale_fill_manual(values = rep("#d9eaf7", length(unique(smr_treatment$Procedure_NA)))) + 
+  jacc_theme() + 
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10)) +
+  jacc_theme()+
+  theme(legend.position = "none",
+    plot.title = element_text(size = 12, face = "bold"))
+
+
+```
+
+2.    Only Yes or No assumed as an answer. If person didn't have either "Yes" or "No", going to "Other" treatment
+      Procedure_No = case_when(
+      Surgery == "Yes" & Chemotherapy == "No" & Radiotherapy == "No" ~ "Surgery Only",
+      Chemotherapy == "No" & Radiotherapy == "Yes" ~ "Radiotherapy Only",
+      Chemotherapy == "Yes" & Radiotherapy == "No" ~ "Chemotherapy Only",
+      Chemotherapy == "Yes" & Radiotherapy == "Yes" ~ "Chemotherapy and Radiotherapy",
+      TRUE ~ "Other")
+      
+    
+```{r No, echo = FALSE}
+
+c <- lexpand(cancer_observed, status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = FollowUpStart, # Without those that did not meet follow-up
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(0, 40, 50, 60, 70, 80, Inf)),
+             aggre = list(agegroup = age, deathyear = per, Procedure_No))
+
+smr_treatment <- sir(coh.data = c, coh.obs = 'from0to1',
+                     coh.pyrs = 'pyrs',
+                     ref.data = gen_2,
+                     ref.rate = 'gen_cvd_rate',
+                     adjust = c('deathyear', 'agegroup'),
+                     test.type = "homogeneity",
+                     conf.type = "wald",
+                     conf.level = 0.95,
+                     print ='Procedure_No') %>%
+  mutate(sir.lo = qchisq(0.05 / 2, df = 2 * observed) / (2 * expected),
+         sir.hi = qchisq(1 - 0.05 / 2, df = 2 * (observed + 1)) / (2 * expected))
+tabyl(cancer_observed$Procedure_No, show_na = TRUE, show_missing_levels = T) %>%
+  kable()
+
+# Graph
+
+ggplot(data = smr_treatment, aes(x = Procedure_No, y = sir, fill = Procedure_No)) +
+  geom_bar(stat = "identity", color = "royalblue4", width = 0.5) +  # Bar plot with black borders and custom width
+  geom_errorbar(aes(ymin = sir.lo, ymax = sir.hi), width = 0.2, color = "royalblue4") +  # Add error bars
+  geom_text(aes(label = sprintf("%.2f", sir)), vjust = -0.5, hjust = -0.4, size = 4) +  # Add SMR labels above bars
+  geom_hline(yintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 0.5) +
+  xlab("Initial Treatment") +
+  ylab("SMR") +
+  labs(title = "SMRs by Initial Treatment \n Handling unknowns as treatment modality Other") +
+  scale_fill_manual(values = rep("#d9eaf7", length(unique(smr_treatment$Procedure_No)))) + 
+  jacc_theme() + 
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10)) +
+  jacc_theme()+
+  theme(legend.position = "none",
+    plot.title = element_text(size = 12, face = "bold"))
+
+
+```
+
+3.  Handling "Unk" to any procedure as if it was a "No"
+    Procedure_No_Unknown = case_when(
+    Surgery == "Yes" & Chemotherapy %in% c("No", "Unk") & Radiotherapy %in% c("No", "Unk") ~ "Surgery Only",
+    Radiotherapy == "Yes" & Chemotherapy %in% c("No", "Unk") ~ "Radiotherapy Only",
+    Chemotherapy == "Yes" & Radiotherapy %in% c("No", "Unk") ~ "Chemotherapy Only",
+    Chemotherapy == "Yes" & Radiotherapy == "Yes" ~ "Chemotherapy and Radiotherapy",
+    TRUE ~ "Other")
+    
+```{r No_Unknown, echo = FALSE}
+
+c <- lexpand(cancer_observed, status = cvdStatus != 0, 
+             birth = birth_date,
+             entry = FollowUpStart, # Without those that did not meet follow-up
+             exit = FollowUpEnd, 
+             breaks = list(per = 2004:2022, age = c(0, 40, 50, 60, 70, 80, Inf)),
+             aggre = list(agegroup = age, deathyear = per, Procedure_No_Unknown))
+
+smr_treatment <- sir(coh.data = c, coh.obs = 'from0to1',
+                     coh.pyrs = 'pyrs',
+                     ref.data = gen_2,
+                     ref.rate = 'gen_cvd_rate',
+                     adjust = c('deathyear', 'agegroup'),
+                     test.type = "homogeneity",
+                     conf.type = "wald",
+                     conf.level = 0.95,
+                     print ='Procedure_No_Unknown') %>%
+  mutate(sir.lo = qchisq(0.05 / 2, df = 2 * observed) / (2 * expected),
+         sir.hi = qchisq(1 - 0.05 / 2, df = 2 * (observed + 1)) / (2 * expected))
+tabyl(cancer_observed$Procedure_No_Unknown,  show_na = TRUE, show_missing_levels = T) %>%
+  kable()
+
+
+# Graph
+
+ggplot(data = smr_treatment, aes(x = Procedure_No_Unknown, y = sir, fill = Procedure_No_Unknown)) +
+  geom_bar(stat = "identity", color = "royalblue4", width = 0.5) +  # Bar plot with black borders and custom width
+  geom_errorbar(aes(ymin = sir.lo, ymax = sir.hi), width = 0.2, color = "royalblue4") +  # Add error bars
+  geom_text(aes(label = sprintf("%.2f", sir)), vjust = -0.5, hjust = -0.4, size = 4) +  # Add SMR labels above bars
+  geom_hline(yintercept = 1, linetype = "dashed", color = "#FF3D2E", size = 0.5) +
+  xlab("Initial Treatment") +
+  ylab("SMR") +
+  labs(title = "SMRs by Initial Treatment \n Handling unknowns as having answered No to any treatment") +
+  scale_fill_manual(values = rep("#d9eaf7", length(unique(smr_treatment$Procedure_No_Unknown)))) + 
+  jacc_theme() + 
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10)) +
+  jacc_theme()+
+  theme(legend.position = "none",
+    plot.title = element_text(size = 12, face = "bold"))
+
+```
+
+

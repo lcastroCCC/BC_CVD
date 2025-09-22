@@ -1,0 +1,567 @@
+# Load libraries
+library(survival)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(gt)
+library(survival)
+library(scales)
+library(purrr)
+library(broom)
+
+# Data  -------------------------------------------------------------------
+
+paths <- c("C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_registry_20240924.csv",
+           "~/Downloads/Registro Central de Cancer/cancer_registry_20240924.csv",
+           paste0("C:/Users/lcastro/OneDrive - Centro Comprensivo de Cancer UPR/projects_shared/BBC/Project_Dra. Carola/Data/Registro Central de Cáncer/cancer_registry_20240924.csv"))
+
+# Loading dataframe
+
+data <- suppressWarnings(tryCatch({
+  read.csv(paths[1], fileEncoding = "UTF-8")
+}, error = function(e) {
+  read.csv(paths[2], fileEncoding = "UTF-8")
+}, error = function(e) {
+  read.csv(paths[3], fileEncoding = "UTF-8")
+}))
+
+# ER Assay, PR Assay & HER2 
+# Reference links for encoding in data dictionary document
+data <- data %>%
+  mutate(ER = ifelse(ERassay  %in% c('1','010'), 'Positive', 
+                     ifelse(ERassay %in% c('0','020'),'Negative',
+                            ifelse(ERassay %in% c('999',NA,'9'), 'Unknown','Other'
+                            ))),
+         PR = ifelse(PRassay  %in% c('1','010'), 'Positive', 
+                     ifelse(PRassay %in% c('0','020'),'Negative',
+                            ifelse(PRassay %in% c('999',NA,'9'), 'Unknown','Other'
+                            ))),
+         HER2.cat = ifelse(HER2  %in% c('1','010'), 'Positive', 
+                           ifelse(HER2 %in% c('0','020'),'Negative',
+                                  ifelse(HER2 %in% c('999',NA,'9'), 'Unknown','Other'
+                                  )))
+         
+  )
+data$ER <- factor(data$ER, 
+                  levels = c('Positive','Negative',
+                             'Other','Unknown'))
+data$PR <- factor(data$PR, 
+                  levels = c('Positive','Negative',
+                             'Other','Unknown'))
+data$HER2.cat <- factor(data$HER2.cat, 
+                        levels = c('Positive','Negative',
+                                   'Other','Unknown'))
+
+#Set factor order for Stage at Diagnosis
+data$StageAtDx <- relevel(factor(data$StageAtDx), ref = "Localized")
+
+# Health Region Variable
+data$HealthRegion <- str_to_title(data$HealthRegion)
+data$HealthRegion <- factor(data$HealthRegion,
+                            levels = c('Noreste Metro','Central Bayamon','Oeste Aguadilla/Mayaguez',
+                                       'Sureste Caguas','Sur Ponce',"Norte Arecibo",
+                                       'Este Fajardo','County Unknown'
+                            ))
+
+data <- data %>%
+  mutate(Procedure = case_when(
+    Surgery == "Yes" & Chemotherapy == "No" & Radiotherapy == "No" ~ "Surgery Only",
+    Chemotherapy == "No" & Radiotherapy == "Yes" ~ "Radiotherapy Only",
+    Chemotherapy == "Yes" & Radiotherapy == "No" ~ "Chemotherapy Only",
+    Chemotherapy == "Yes" & Radiotherapy == "Yes" ~ "Chemotherapy and Radiotherapy",
+    TRUE ~ "Other"
+  ))
+
+data$Procedure <-  factor(data$Procedure,
+                          levels = c("Surgery Only", "Chemotherapy Only",
+                                     "Radiotherapy Only", "Chemotherapy and Radiotherapy",
+                                     "Other"))
+
+# Comorbidities
+data <- data %>%
+  mutate(Comorb.cat = factor(ifelse(Comorb == '0' , 'No', 
+                                    ifelse(as.numeric(Comorb) >= 1, 'Yes', 'Unknown')),
+                             levels= c('Yes','No','Unknown')) ,
+         `Myocardial Infarction` = factor(ifelse(C1 == 0 & C0 == 0 , 'No', 
+                                                 ifelse(C1 == 1 | C0 == 1, 'Yes', 'Unknown')),
+                                          levels= c('Yes','No','Unknown')), 
+         `Congestive heart failure` = factor(ifelse(C2 == 0 , 'No', 
+                                                    ifelse(C2 == 1, 'Yes', 'Unknown')),
+                                             levels= c('Yes','No','Unknown')),
+         `Peripheral vascular disease` = factor(ifelse(C3 == 0 , 'No', 
+                                                       ifelse(C3 == 1, 'Yes', 'Unknown')),
+                                                levels= c('Yes','No','Unknown')),
+         `Cerebrovascular disease` = factor(ifelse(C4 == 0 , 'No', 
+                                                   ifelse(C4 == 1, 'Yes', 'Unknown')),
+                                            levels= c('Yes','No','Unknown')),
+         `Chronic pulmonary disease` = factor(ifelse(C6 == 0 , 'No', 
+                                                     ifelse(C6 == 1, 'Yes', 'Unknown')),
+                                              levels= c('Yes','No','Unknown')),
+         `Diabetes without chronic complication` = factor(ifelse(C10 == 0 , 'No', 
+                                                                 ifelse(C10 == 1, 'Yes', 'Unknown')),
+                                                          levels= c('Yes','No','Unknown')),
+         `Diabetes with chronic complication` = factor(ifelse(C11 == 0 , 'No', 
+                                                              ifelse(C11 >= 1, 'Yes', 'Unknown')),
+                                                       levels= c('Yes','No','Unknown')),
+  )
+
+# To determine and classify how many comorbidities 
+data$Csum <- apply(data[, c('Myocardial Infarction','Congestive heart failure', 
+                            'Peripheral vascular disease',
+                            'Cerebrovascular disease',
+                            'Chronic pulmonary disease',
+                            'Diabetes without chronic complication',
+                            'Diabetes with chronic complication')],1, function(x)sum(grepl("Yes",x)))
+
+data$CsumCat <- factor(with(data, ifelse(Csum == 0, 'No comorbidity',
+                                         ifelse(Csum >= 1 & Csum <=2, '1-2 comorbidities',
+                                                ifelse(Csum >= 3, '3 or more comorbidites', '')))),
+                       levels = c('3 or more comorbidites','1-2 comorbidities','No comorbidity')
+)
+
+
+
+# CVD vs Non CVD death
+data$Vital <- ifelse(data$VitalStatus == 0 & data$CVDDeathCause == 'CVD death','CVD death', 
+                     ifelse(data$VitalStatus == 0 & data$BCDeathCause == 'BC death', 'BC death', 
+                            ifelse(data$VitalStatus == 0, 'Other Death', 'Alive'
+                            )))
+
+# time: Delta year of diagnosis and year follow up (year of death if vital status == 0) 
+# Vital Status: 1 = Alive, 0 = dead
+
+# Recode status to 1 event (CVD death) and 0 censored
+data$status <- ifelse(data$VitalStatus == 0 & data$CVDDeathCause == 'CVD death',1, 0)
+
+# Recode status to 1 event (CVD death) and 0 censored
+data$statusBC <- ifelse(data$VitalStatus == 0 & data$BCDeathCause == 'BC death',1, 0)
+data$statusBC <- as.factor(data$statusBC)
+
+# Recode status to 1 event (All cause death) and 0 censored (for all cause mortality)
+data$status1 <- ifelse(data$VitalStatus == 0 ,1, 0)
+
+# Recode status to 1 (CVD death), 2 (Other death), 0 (Alive)
+data <- data %>%
+  mutate(
+    status2 =  ifelse(data$VitalStatus == 0 & data$CVDDeathCause == 'CVD death',1, 
+                      ifelse(data$VitalStatus == 0, 2, 0
+                      )),
+    status2 = as.factor(status2),
+    status2.cat = ifelse(status2 == 1, 'CVD Death',
+                         ifelse(status2 == 2, 'Other Death', 'Alive'))
+  )
+
+# Recode status to 1 (CVD death), 2 (BC death), 3 (Other Death), 0 (Alive)
+data <- data %>%
+  mutate(
+    statusV = ifelse(data$Vital == 'CVD death' ,1,
+                     ifelse(data$Vital == 'BC death' ,2, 
+                            ifelse(data$Vital == 'Other Death', 3, 0
+                            ))),
+    statusV = as.factor(statusV),
+  )
+
+# time to follow up 
+data <- data %>%
+  mutate(mm_dx = as.numeric(ifelse(is.na(mm_dx), 6, mm_dx)),
+         mm_dlc = as.numeric(ifelse(is.na(mm_dlc), 6, mm_dlc)),
+         DiagnosisDate = make_date(year = ydiag, month = mm_dx, day = 2),
+         FollowUpStart = DiagnosisDate %m+% years(1),
+         FollowUpEnd = if_else(yy_dlc > 2021, as.Date("2021-12-31"), make_date(year = yy_dlc, month = mm_dlc, day = 2)),
+         FollowUpYears = if_else(FollowUpEnd < FollowUpStart, 0, 
+                                 as.numeric(difftime(FollowUpEnd, FollowUpStart, units = "days")) / 365.25),
+         time = FollowUpYears,
+         AgeFU = AgeDx + time,
+         maritallabel = factor(str_to_title(maritallabel), levels = c("Married", "Unmarried", "Unknown")),
+         AgeDx = ifelse(AgeDx == 999, NA, AgeDx),
+         AgeDxCat = as.factor(case_when(AgeDx >= 18 & AgeDx <= 39 ~ "18-39",
+                                        AgeDx >= 40 & AgeDx <= 49 ~ "40-49",
+                                        AgeDx >= 50 & AgeDx <= 59 ~ "50-59",
+                                        AgeDx >= 60 & AgeDx <= 69 ~ "60-69",
+                                        AgeDx >= 70 & AgeDx <= 79 ~ "70-79",
+                                        AgeDx >= 80 ~ "80+",
+                                        TRUE ~ NA)),
+         StageAtDx_num = as.numeric(StageAtDx),
+         Procedure_num = as.numeric(Procedure),
+         Comorb.cat_num = as.numeric(Comorb.cat),
+         maritallabel_num = as.numeric(maritallabel))
+
+data$yearDiagCat <- cut(data$ydiag, 
+                        breaks = c(2003, 2009, 2014, 2019), 
+                        labels = c("2004-2009", "2010-2014", "2015-2019"),
+                        right = TRUE)
+
+data <- data %>%
+  filter(time > 0) # Person met follow-up criteria
+
+# Fit the time-varying coefficient Cox model
+data <- data %>% mutate(log_time = log(time))
+tv_model <- coxph(Surv(time, status) ~ AgeDx + tt(AgeDx), data = data,
+                  tt = function(x, t, ...) x * log(t))
+
+# Extract coefficients and variance-covariance matrix
+coef_est <- coef(tv_model)
+vcov_mat <- vcov(tv_model)
+
+# Coefficients
+beta1 <- coef_est["AgeDx"]
+beta2 <- coef_est["tt(AgeDx)"]
+
+# Time points
+times <- c(1, 3, 5, 7, 10)  
+log_times <- log(times)
+
+# Compute HRs and 95% CI at each time point
+hr_table <- data.frame(Time = times)
+hr_table$HR <- round(exp(beta1 + beta2 * log_times),3)
+
+# Compute standard error for linear combination: var(beta1 + log(t)*beta2)
+se <- sqrt(
+  vcov_mat["AgeDx", "AgeDx"] +
+    log_times^2 * vcov_mat["tt(AgeDx)", "tt(AgeDx)"] +
+    2 * log_times * vcov_mat["AgeDx", "tt(AgeDx)"]
+)
+
+# 95% Confidence Intervals
+hr_table$`95% CI` <- paste0("(", round(exp((beta1 + beta2 * log_times) - 1.96 * se),3), " - ",
+                            round(exp((beta1 + beta2 * log_times) + 1.96 * se),3), ")")
+
+# Fit baseline survival curve to get number at risk at specified time points
+fit <- survfit(Surv(time, status) ~ 1, data = data)
+
+# Get number at risk at the specified time points (1, 3, 5, 10, 18)
+risk_at_times <- summary(fit, times = times)$n.risk
+
+# Add the number at risk to the hr_table
+hr_table$`At Risk` <- risk_at_times
+
+# Print result
+print(hr_table)
+
+summary(fit, times = c(1,3,5,10,17))$n.risk
+
+# Alternate way to get that:
+sapply(c(1, 3, 5, 10) , function(t) {
+  sum(data$time >= t) # Count the people who have survival time >= t and either are alive or censored at time t
+})
+
+hr_table2 <- hr_table %>%
+  mutate(
+    # Extract only the text inside the parentheses
+    CI_only = gsub(".*\\((.*)\\).*", "\\1", `95% CI`),
+    # Split and convert to numeric
+    CI_lower = as.numeric(sapply(strsplit(CI_only, " - "), `[`, 1)),
+    CI_upper = as.numeric(sapply(strsplit(CI_only, " - "), `[`, 2))
+  ) %>%
+  select(-CI_only)
+
+
+# Create the forest plot using ggplot2
+ggplot(hr_table2, aes(x = HR, y = Time)) +
+  geom_point(size = 4, color = "indianred") +
+  geom_errorbarh(aes(xmin = CI_lower, xmax = CI_upper), height = 0.2) +
+  geom_text(aes(label = round(HR,2)), nudge_y = 0.3) +
+  theme_minimal() +
+  labs(
+    x = "Hazard Ratio (HR)",
+    y = "Time since Diagnosis (Years)") +
+  theme(
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 14),
+    plot.title = element_text(size = 16, face = "bold"),
+    legend.position = "none",  # Remove the legend
+    axis.text.y = element_text(size = 12, face = "bold")) +
+  theme(axis.text.y = element_text(size = 12, face = "bold")) +
+ scale_y_continuous(breaks = c(0, 1, 3, 5, 7, 10))
+
+
+
+# Multivariable model - Table with age and stage HR at lag times and plot ------
+
+tv_model <- coxph(
+  Surv(time, status) ~ AgeDx + StageAtDx_num + Comorb.cat + Procedure + maritallabel +
+    tt(AgeDx) + tt(StageAtDx_num) + tt(Comorb.cat_num) + tt(Procedure_num) + tt(maritallabel_num),
+  data = data,
+  tt = function(x, t, ...) x * log(t))
+
+# Extract coefficients and variance-covariance matrix
+coef_est <- coef(tv_model)
+vcov_mat <- vcov(tv_model)
+
+# Time points
+times <- c(1, 3, 5, 7, 10)
+log_times <- log(times)
+
+# Define the variables to analyze
+variables <- c("AgeDx", "StageAtDx_num")
+tv_variables <- paste0("tt(", c("AgeDx", "StageAtDx_num"), ")")
+
+# Create an empty list to store results
+tv_covariates_table_list <- list()
+
+# Loop through each time-varying covariate
+for (i in seq_along(tv_variables)) {
+  
+  # Handle time-varying terms
+  var_tv <- tv_variables[i]
+  
+  # Check if time-varying term exists in the model coefficients
+  if (var_tv %in% names(coef_est)) {
+    
+    # Extract coefficient and standard error for the time-varying term
+    beta_tv <- coef_est[var_tv]
+    
+    # Extract standard errors from the variance-covariance matrix
+    se_tv <- sqrt(
+      vcov_mat[var_tv, var_tv] +
+        log_times^2 * vcov_mat[var_tv, var_tv]
+    )
+    
+    # Compute hazard ratios and confidence intervals for the time-varying term
+    hr_tv <- exp(beta_tv + beta_tv * log_times)
+    ci_lower_tv <- exp((beta_tv + beta_tv * log_times) - 1.96 * se_tv)
+    ci_upper_tv <- exp((beta_tv + beta_tv * log_times) + 1.96 * se_tv)
+    
+    # Create a data frame to store the results for this time-varying term
+    temp_table <- data.frame(
+      Covariate = rep(tv_variables[i], length(times)),
+      Time = times,
+      HR = round(hr_tv, 3),
+      CI_lower = round(ci_lower_tv, 3),
+      CI_upper = round(ci_upper_tv, 3)
+    )
+    
+    # Add the table for this covariate to the list
+    tv_covariates_table_list[[i]] <- temp_table
+  } else {
+    message(paste("Skipping time-varying covariate", tv_variables[i], "due to missing terms in model coefficients"))
+  }
+}
+
+# Combine all the results into one data frame
+tv_covariates_table <- do.call(rbind, tv_covariates_table_list)
+
+n_df <- tibble(
+  Time = times,
+  N = sapply(times, \(t) sum(data$time >= t)) |> comma()
+)
+
+# Create HR and CI columns as one string for each time point
+tv_covariates_table_wide <- tv_covariates_table %>%
+  mutate(
+    HR_label = paste0(Time, "_HR"),
+    CI_label = paste0(Time, "_HR_CI"),
+    HR_CI = paste0(CI_lower, "–", CI_upper)
+  ) %>%
+  pivot_wider(
+    id_cols = Covariate,
+    names_from = Time,
+    values_from = c(HR, HR_CI),
+    names_glue = "{Time}_{.value}"
+  )
+
+# Create the final gt table
+tv_covariates_table_wide %>%
+  mutate(
+    Covariate = case_when(
+      Covariate == "tt(AgeDx)" ~ "Age at Diagnosis",
+      Covariate == "tt(StageAtDx_num)" ~ "Stage at Diagnosis",
+      TRUE ~ Covariate 
+    )
+  ) %>%
+  gt() %>%
+  tab_spanner(label = paste0("1+ years \n(n = ",n_df$N[1], ")"), columns = c("1_HR", "1_HR_CI")) %>%
+  tab_spanner(label = paste0("3+ years \n(n = ",n_df$N[2], ")"), columns = c("3_HR", "3_HR_CI")) %>%
+  tab_spanner(label = paste0("5+ years \n(n = ",n_df$N[3], ")"), columns = c("5_HR", "5_HR_CI")) %>%
+  tab_spanner(label = paste0("7+ years \n(n = ",n_df$N[4], ")"), columns = c("7_HR", "7_HR_CI")) %>%
+  tab_spanner(label = paste0("10+ years \n(n = ",n_df$N[5], ")"), columns = c("10_HR", "10_HR_CI")) %>%
+  fmt_number(columns = ends_with("_HR"), decimals = 3) %>%
+  cols_label(
+    Covariate = "Variable",
+    `1_HR_CI` = "95% CI",
+    `3_HR_CI` = "95% CI",
+    `5_HR_CI` = "95% CI",
+    `7_HR_CI` = "95% CI",
+    `10_HR_CI` = "95% CI",
+    `1_HR` = "HR",
+    `3_HR` = "HR",
+    `5_HR` = "HR",
+    `7_HR` = "HR",
+    `10_HR` = "HR"
+  ) %>%
+  tab_footnote(
+    footnote = "Variables are time-dependent (i.e., covariates vary over time)."
+  )
+
+# Rename for clarity
+tv_covariates_table_plot <- tv_covariates_table %>%
+  mutate(
+    Covariate = case_when(
+      Covariate == "tt(AgeDx)" ~ "Age at Diagnosis",
+      Covariate == "tt(StageAtDx_num)" ~ "Stage at Diagnosis",
+      TRUE ~ Covariate
+    )
+  )
+
+# Plot
+ggplot(tv_covariates_table_plot, aes(x = Time, y = HR, color = Covariate, fill = Covariate)) +
+  geom_line(size = 1.2) +
+ # geom_ribbon(aes(ymin = CI_lower, ymax = CI_upper), alpha = 0.2, color = NA) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "gray30") +
+  labs(
+    x = "Years Since Follow-up",
+    y = "Hazard Ratio (HR)",
+    title = "Time-Dependent Hazard Ratios with 95% Confidence Intervals",
+    subtitle = "HRs modeled using time-dependent covariates",
+    color = "Covariate",
+    fill = "Covariate"
+  ) +
+  theme_minimal(base_size = 14)
+
+
+# HR - Non-stratified regression models - coxph(Surv(FollowUpYears, status) ~ AgeDx + StageAtDx + Procedure + maritallabel, data = data) -----------------------------------
+
+# Subset cancer_observed into five survival groups
+surv_sets <- list(
+  "<4 years"   = cancer_observed %>% filter(SurvivalTime < 4),
+  "4-<6 years" = cancer_observed %>% filter(SurvivalTime >= 4, SurvivalTime < 6),
+  "6-<8 years" = cancer_observed %>% filter(SurvivalTime >= 6, SurvivalTime < 8),
+  "8-<10 years"= cancer_observed %>% filter(SurvivalTime >= 8, SurvivalTime < 10),
+  "10+ years"  = cancer_observed %>% filter(SurvivalTime >= 10)
+)
+
+# Define function to run Cox model and return HR table
+get_hr_table <- function(data, label) {
+  n <- nrow(data)
+  if (n == 0) return(NULL)
+  
+  model <- coxph(Surv(FollowUpYears, status) ~ AgeDx + StageAtDx + Procedure + maritallabel, data = data)
+  
+  broom::tidy(model, conf.int = TRUE, exponentiate = TRUE) %>%
+    mutate(Group = paste0(label, " (n = ", comma(n), ")")) %>%
+    select(Group, term, estimate, conf.low, conf.high)
+}
+
+# Apply to all survival sets
+results <- imap_dfr(surv_sets, get_hr_table)
+
+# Clean and reshape
+results <- results %>%
+  mutate(term = recode(term,
+                       "AgeDx" = "Age at Diagnosis",
+                       "StageAtDxRegional" = "Regional",
+                       "StageAtDxDistant" = "Distant",
+                       "StageAtDxUnknown/unstaged" = "Unknown/Unstaged",
+                       "ProcedureChemotherapy Only" = "Chemotherapy Only",
+                       "ProcedureRadiotherapy Only" = "Radiotherapy Only",
+                       "ProcedureChemotherapy and Radiotherapy" = "Chemotherapy & Radiotherapy",
+                       "ProcedureOther" = "Other Procedure",
+                       "maritallabelUnmarried" = "Unmarried")) %>%
+  mutate(across(c(estimate, conf.low, conf.high), ~ ifelse(is.infinite(.x) | .x == 0 | is.na(.x), NA, .x))) %>%
+  mutate(across(c(estimate, conf.low, conf.high), round, 2)) %>%
+  mutate(HR_CI = ifelse(is.na(estimate), "-", paste0(estimate, " (", conf.low, ", ", conf.high, ")"))) %>%
+  select(Variable = term, Group, HR_CI) %>%
+  pivot_wider(names_from = Group, values_from = HR_CI) %>%
+  add_row(Variable = "Married", .before = which(.$Variable == "Unmarried")[1]) %>%
+  add_row(Variable = "Surgery Only", .before = which(.$Variable == "Chemotherapy Only")[1]) %>%
+  add_row(Variable = "Localized", .before = which(.$Variable == "Regional")[1]) %>%
+  mutate(across(-Variable, ~replace_na(.x, "1.00")))
+
+# Format with gt
+hr_gt <- results %>%
+  gt(rowname_col = "Variable") %>%
+  tab_spanner(label = "Hazard Ratios (HR, 95% CI) by Survival Time", columns = starts_with(c("<", "4-", "6-", "8-", "10"))) %>%
+  tab_row_group(label = "Stage at Diagnosis", rows = matches("Localized|Regional|Distant|Unknown")) %>%
+  tab_row_group(label = "Initial Treatment Type", rows = matches("Surgery|Chemo|Radio|Other")) %>%
+  tab_row_group(label = "Marital Status", rows = matches("Married|Unmarried")) %>%
+  tab_style(style = cell_text(align = "center"), locations = cells_body(columns = everything())) %>%
+  tab_style(style = cell_text(align = "center"), locations = cells_column_labels(columns = everything())) %>%
+  row_group_order(groups = c("Stage at Diagnosis", "Initial Treatment Type", "Marital Status"))
+
+# Save output
+gtsave(hr_gt, "/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/hr_table_surv_groups.html")
+
+# HR - Stratified regression models ---------------------------------------
+cancer_observed <- cancer_observed %>%
+  mutate(maritallabel = ifelse(is.na(maritallabel),
+       "Unknown",
+       maritallabel))
+
+#Recommendations:
+#  Use fewer predictors — either:
+# Collapse Procedure into fewer categories, or
+# Run models stratified by marital status or procedure (not both).
+# Combine age groups or outcome categories to boost events, if scientifically justifiable.
+# Report cautiously: interpret trends, not significance. This model is more descriptive than inferential.
+# concordance: 0.5 useless, 1.0 perfect (also useless)
+model1 <- coxphf(Surv(FollowUpYears, status) ~ Procedure, 
+       data = cancer_observed %>% 
+         filter(AgeDxCatRecode == "<70", StageAtDx == "Localized"),
+       maxit = 1000,   
+       maxstep = 0.5)
+
+data.frame(
+  term = names(model1$coefficients),
+  coef = model1$coefficients,
+  se = sqrt(diag(model1$var)),
+  HR = exp(model1$coefficients),
+  lower_95 = exp(model1$ci.lower),
+  upper_95 = exp(model1$ci.upper),
+  p = model1$prob)
+# model1 <- coxph(Surv(FollowUpYears, status) ~ Procedure, 
+#                 data = cancer_observed %>% filter(AgeDxCatRecode == "<70",
+#                                                   StageAtDx == "Localized")); summary(model1)
+
+#broom::tidy(model1, conf.int = TRUE, exponentiate = TRUE)
+
+model1 <- coxph(Surv(FollowUpYears, status) ~ Procedure + maritallabel, 
+                data = cancer_observed %>% filter(AgeDxCatRecode == "<70",
+                                                  StageAtDx == "Localized")); summary(model1)
+
+broom::tidy(model1, conf.int = TRUE, exponentiate = TRUE)
+
+
+model2 <- coxph(Surv(FollowUpYears, status) ~ Procedure + maritallabel, 
+                data = cancer_observed %>% filter(AgeDxCatRecode == "70+",
+                                                  StageAtDx == "Localized"))
+summary(model2)
+
+model3 <- coxph(Surv(FollowUpYears, status) ~ Procedure + maritallabel, 
+                data = cancer_observed %>% filter(AgeDxCatRecode == "<70",
+                                                  StageAtDx == "Regional"))
+summary(model3)
+
+model4 <- coxph(Surv(FollowUpYears, status) ~ Procedure + maritallabel, 
+                data = cancer_observed %>% filter(AgeDxCatRecode == "70+",
+                                                  StageAtDx == "Regional"))
+summary(model4)
+
+model5 <- coxph(Surv(FollowUpYears, status) ~ Procedure + maritallabel, 
+                data = cancer_observed %>% filter(AgeDxCatRecode == "<70",
+                                                  StageAtDx == "Distant"))
+summary(model5)
+
+model6 <- coxph(Surv(FollowUpYears, status) ~ Procedure + maritallabel, 
+                data = cancer_observed %>% filter(AgeDxCatRecode == "70+",
+                                                  StageAtDx == "Distant"))
+summary(model6)
+
+cancer_observed <- cancer_observed %>%
+  mutate(cardiotoxic_t = ifelse(Radiotherapy == "Yes" |
+                                  Chemotherapy == "Yes", "Yes", "No"))
+
+# Only stratifying by one variable
+
+model1 <- coxph(Surv(FollowUpYears, status) ~  Procedure + maritallabel, 
+                                 data = cancer_observed %>% filter(AgeDxCatRecode == "<70",
+                                                                   StageAtDx != "Unknown/unstaged")); summary(model1)
+broom::tidy(model1, conf.int = TRUE, exponentiate = TRUE)
+
+model1 <- coxph(Surv(FollowUpYears, status) ~  Procedure + maritallabel, 
+                data = cancer_observed %>% filter(AgeDxCatRecode == "70+",
+                                                  StageAtDx != "Unknown/unstaged")); summary(model1)
+broom::tidy(model1, conf.int = TRUE, exponentiate = TRUE)
+
+model_combined <- coxph(Surv(FollowUpYears, status) ~ Procedure * AgeDxCatRecode + maritallabel + StageAtDx, data = cancer_observed); model_combined
+broom::tidy(model_combined, conf.int = TRUE, exponentiate = TRUE)
+

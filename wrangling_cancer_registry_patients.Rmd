@@ -78,14 +78,30 @@ cancer <- cancer.raw %>%
           mm_dlc, yy_dlc, FollowUpEnd, FollowUpYears, AgeDeath, FollowUpYears,
           AgeDeathCat2, Vital, cvdStatus, yearDiagCat, deathYearCat, SurvivalTime, maritallabel, StageAtDx, Surgery, Radiotherapy, Chemotherapy,
           Comorb, DxCounty, DxCity, HealthRegion) %>%
-    mutate(Procedure = case_when(
-    Surgery == "Yes" & Chemotherapy == "No" & Radiotherapy == "No" ~ "Surgery Only",
-    Chemotherapy == "No" & Radiotherapy == "Yes" ~ "Radiotherapy Only",
-    Chemotherapy == "Yes" & Radiotherapy == "No" ~ "Chemotherapy Only",
+  mutate(Procedure = case_when(
+    Surgery == "Yes" & Chemotherapy %in% c("No", "Unk") & Radiotherapy %in% c("No", "Unk") ~ "Surgery Only",
+    Radiotherapy == "Yes" & Chemotherapy %in% c("No", "Unk") ~ "Radiotherapy Only",
+    Chemotherapy == "Yes" & Radiotherapy %in% c("No", "Unk") ~ "Chemotherapy Only",
     Chemotherapy == "Yes" & Radiotherapy == "Yes" ~ "Chemotherapy and Radiotherapy",
     TRUE ~ "Other"),
-  Procedure = factor(Procedure, levels = c("Surgery Only", "Radiotherapy Only", "Chemotherapy Only",
-                     "Chemotherapy and Radiotherapy", "Other")),
+    Procedure_No = case_when(
+      Surgery == "Yes" & Chemotherapy == "No" & Radiotherapy == "No" ~ "Surgery Only",
+      Chemotherapy == "No" & Radiotherapy == "Yes" ~ "Radiotherapy Only",
+      Chemotherapy == "Yes" & Radiotherapy == "No" ~ "Chemotherapy Only",
+      Chemotherapy == "Yes" & Radiotherapy == "Yes" ~ "Chemotherapy and Radiotherapy",
+      TRUE ~ "Other"),
+    Procedure_Unk_OFF = case_when(
+      Surgery == "Unk" | Chemotherapy == "Unk" | Radiotherapy == "Unk" ~ NA_character_,
+      Surgery == "Yes" & Chemotherapy == "No" & Radiotherapy == "No" ~ "Surgery Only",
+      Chemotherapy == "No" & Radiotherapy == "Yes" ~ "Radiotherapy Only",
+      Chemotherapy == "Yes" & Radiotherapy == "No" ~ "Chemotherapy Only",
+      Chemotherapy == "Yes" & Radiotherapy == "Yes" ~ "Chemotherapy and Radiotherapy",
+      TRUE ~ "Other"),
+    Procedure_Unk_OFF = factor(Procedure_Unk_OFF, levels = c("Surgery Only", "Chemotherapy Only", "Radiotherapy Only", "Chemotherapy and Radiotherapy", "Other")),
+    Procedure_No = factor(Procedure_No, levels = c("Surgery Only", "Chemotherapy Only", "Radiotherapy Only", 
+                                                   "Chemotherapy and Radiotherapy", "Other")),
+    Procedure = factor(Procedure, levels = c("Surgery Only", "Chemotherapy Only", "Radiotherapy Only",
+                                                   "Chemotherapy and Radiotherapy", "Other")),
     AgeDxCat = case_when(
       AgeDx <= 39 ~ "18-39",
       AgeDx >= 40 & AgeDx <= 49 ~ "40-49",
@@ -371,7 +387,7 @@ suppressWarnings(tryCatch({
 
 # Exporting cancer data for use in smr calculations
 suppressWarnings(tryCatch({
-  write.csv(cancer, "C:/Users/Genesis Rodriguez/Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_cleansed.csv")
+  write.csv(cancer, "~/Library/CloudStorage/Box-Box/Sanchez-Diaz Lab/CVD and BC/Registro Central de Cancer/Data/cancer_cleansed.csv")
 }, error = function(e) {
   write.csv(cancer, "~/Downloads/Registro Central de Cancer/cancer_cleansed.csv")
 }, error = function(e) {

@@ -36,6 +36,7 @@ library(gt)
 library(knitr)
 library(kableExtra)
 library(RColorBrewer)}
+library(patchwork)
 
 ```
 
@@ -301,14 +302,6 @@ add_p(
   modify_caption("**Table 1: Baseline Characteristics of Study Population**") %>%
   as_gt(); gt_table1
 
-# Saving table
-gtsave(gt_table1, "~/Downloads/Statistical Analysis/Outputs/Tables/Table_1_PR.html")
-
-webshot::webshot("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Tables/Table_1_PR.html",
-                 path.expand("~/Downloads/Statistical Analysis/Outputs/Tables/Table_1_PR.png"),
-                 vwidth = 900,
-                 vheight = 2700)
-
 ```
 
 ```{r v2_with_less_variables}
@@ -371,16 +364,6 @@ gt_table1 <- data %>%
     locations = cells_column_labels(columns = stat_0)
   ); gt_table1
 
-
-# Saving table
-gtsave(gt_table1, "~/Downloads/Statistical Analysis/Outputs/Tables/Table_1_PR.html")
-
-webshot::webshot("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Tables/Table_1_PR.html",
-                 path.expand("~/Downloads/Statistical Analysis/Outputs/Tables/Table_1_PR.png"),
-                 vwidth = 900,
-                 vheight = 1200)
-
-
 ```
 
 ```{r v3_cvd_bc_vs_gen}
@@ -438,16 +421,6 @@ gt_table2 <- tbl_merge(
   tbls = list(gt_table2, gt_table_genpop),
   tab_spanner = c("**Breast Cancer Cohort**", "**General Population**")) %>% 
   as_gt(); gt_table2
-
-
-
-# Saving table
-gtsave(gt_table2, "~/Downloads/Statistical Analysis/Outputs/Tables/Table_2_PR.html")
-
-webshot::webshot("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Tables/Table_2_PR.html",
-                 path.expand("~/Downloads/Statistical Analysis/Outputs/Tables/Table_1_PR.png"),
-                 vwidth = 900,
-                 vheight = 1200)
 
 
 ```
@@ -810,6 +783,46 @@ kable(allCT,  format = "html", escape = FALSE, align = "c")%>%
   footnote(general = "Values are n (%), unless otherwise indicated. Crude number and rate estimates of mortality from the study data. All-cause mortality estimated by Kaplan-Meier methods",
            general_title = "", 
            footnote_as_chunk = TRUE)
+
+```
+
+
+*Table 4b: CVD Specific Mortality Survival Confidence Intervals Table by Age*
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+plots <- allCVD %>%
+  filter(!is.na(AgeDxCat), AgeDxCat != "18-39") %>%
+  split(.$AgeDxCat) %>%
+  purrr::keep(~ sum(!is.na(.x$time) & !is.na(.x$status1) & .x$status1 == 1) > 0) %>%
+  lapply(function(subdata) {
+    fit <- survfit(Surv(time, status1) ~ 1, data = subdata)
+    ggsurv <- ggsurvplot(
+      fit,
+      data = subdata,
+      conf.int = TRUE,
+      risk.table = FALSE,
+      conf.int.fill = "red",
+      legend = "none",
+      ggtheme = theme_minimal(),
+      xlab = "Years",
+      ylab = "Probability of Survival",
+      xlim = c(0, 15),
+      ylim = c(0, 1)
+    )
+
+    ggsurv$plot +
+      ggtitle(unique(subdata$AgeDxCat)) +
+      theme(
+        plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+        axis.text = element_text(size = 10),
+        axis.title = element_text(size = 12)
+      )
+  })
+
+f_cvd_by_age <- wrap_plots(plots, ncol = 3)
+
+ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/cvd_mortality_curve_age.tif", plot = f_cvd_by_age, width = 12, height = 6.5, dpi = 300,  bg = "white")
 
 ```
 
@@ -1243,7 +1256,7 @@ library(cmprsk)
 # Using cuminc from cmprsk package
 cuminc_fit <- cuminc(ftime = data$time, fstatus = data$status2, group = data$AgeDxCat)
 
-ggcompetingrisks(cuminc_fit, conf.int = TRUE, multiple_panels = TRUE) +
+f_cr_cif <- ggcompetingrisks(cuminc_fit, conf.int = TRUE, multiple_panels = TRUE) +
  scale_fill_manual(
     name = "Cause of Death",                 
     values = c("1" = "red", "2" = "black"),   
@@ -1251,7 +1264,9 @@ ggcompetingrisks(cuminc_fit, conf.int = TRUE, multiple_panels = TRUE) +
   scale_color_manual(
     name = "Cause of Death",                  
     values = c("1" = "red", "2" = "black"),   
-    labels = c("1" = "Cardiac Death", "2" = "Other Causes of Death")) 
+    labels = c("1" = "Cardiac Death", "2" = "Other Causes of Death")); f_cr_cif
+
+ggsave("/Users/genesisrodriguez/Downloads/Statistical Analysis/Outputs/Figures/cr_cif_age.tif", plot = f_cr_cif, width = 12, height = 6.5, dpi = 300,  bg = "white")
 
 ```
   
@@ -1515,7 +1530,7 @@ tidycmprsk::cuminc(Surv(time, statusV) ~ StageAtDx, data) %>%
 
 #### <ins>A. Competing Risks Regression </ins> 
 
-##### 1. Subdistribution of Harzards 
+##### 1. Subdistribution of Hazards 
 
 
 *Table 9: Hazard ratios (95% CI) from Subdistribution Hazard Model for Cardiac Death* 

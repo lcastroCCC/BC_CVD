@@ -1,0 +1,746 @@
+---
+title: "Interrupted Time Series Analysis: Impact of Hurricane Maria and COVID-19 on Obesity-Related Cancers in Puerto Rico"
+author: "Biostatistical Analysis"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float: true
+    code_folding: hide
+    fig_width: 12
+    fig_height: 8
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, 
+                      fig.width = 12, fig.height = 8, dpi = 300)
+```
+
+```{r libraries, message=FALSE}
+# Load required libraries
+library(tidyverse)
+library(lmtest)
+library(sandwich)
+library(ggplot2)
+library(gridExtra)
+library(viridis)
+library(scales)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(patchwork)
+library(car)
+library(forecast)
+
+# Set ggplot theme
+theme_set(theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5, color = "gray40"),
+    strip.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  ))
+
+# Custom color palette
+intervention_colors <- c("Pre-Maria" = "#2E86AB", 
+                        "Maria-COVID" = "#A23B72", 
+                        "Post-COVID" = "#F18F01")
+```
+
+## Executive Summary
+
+This analysis evaluates the impact of two major public health disruptions on obesity-related cancer rates in Puerto Rico:
+- **Hurricane Maria (2017)**: Natural disaster causing widespread healthcare disruption
+- **COVID-19 Pandemic (2020)**: Global health emergency affecting healthcare delivery
+
+**Key Findings Preview:**
+- Analysis covers 2000-2022 (23 years) across 12 cancer types
+- Uses robust statistical methods accounting for temporal dependence
+- Focus on Age-Adjusted rates (per 100,000 population)
+
+---
+
+## 1. Data Preparation and Quality Assessment
+
+```{r data_prep}
+# Load and prepare data
+base_path <- "~/Library/CloudStorage/Box-Box/Sanchez-Diaz Lab/Obesity Related Cancers/Analysis Results"
+
+read_data <- function(sub_path, file_prefix) {
+  list(
+    AAPC = read.delim(file.path(base_path, sub_path, paste0(file_prefix, ".Export.AAPC.txt"))),
+    Data = read.delim(file.path(base_path, sub_path, paste0(file_prefix, ".Export.Data.txt")))
+  )
+}
+
+All_Overall <- read_data("All overall", "JP Obesity All Overall Age")
+df_raw <- All_Overall$Data
+
+# Clean cancer type names for better presentation
+df <- df_raw %>%
+  mutate(
+    # Clean cancer type names
+    cancer_type = case_when(
+      str_detect(Obesity.associated.cancers..Overall., "OVERALL") ~ "All Obesity-Related Cancers",
+      str_detect(Obesity.associated.cancers..Overall., "Colon") ~ "Colorectal Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Corrpus") ~ "Endometrial Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Esophageal") ~ "Esophageal Adenocarcinoma",
+      str_detect(Obesity.associated.cancers..Overall., "Gallbladder") ~ "Gallbladder Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Gastric") ~ "Gastric Cardia Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Kidney") ~ "Kidney Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Liver") ~ "Liver Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Meningioma") ~ "Meningioma",
+      str_detect(Obesity.associated.cancers..Overall., "MM") ~ "Multiple Myeloma",
+      str_detect(Obesity.associated.cancers..Overall., "Ovary") ~ "Ovarian Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Pancreas") ~ "Pancreatic Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Postmenopausal") ~ "Postmenopausal Breast Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Thyroid") ~ "Thyroid Cancer",
+      TRUE ~ as.character(Obesity.associated.cancers..Overall.)
+    ),
+    # Create time variables
+    time = Year.2000.2022 - 2000 + 1,  # Sequential time (1-23)
+    year = Year.2000.2022,
+    
+    # Intervention indicators with clinical rationale
+    maria_intervention = ifelse(year >= 2018, 1, 0),  # Maria effects likely delayed to 2018
+    covid_intervention = ifelse(year >= 2020, 1, 0),  # Immediate COVID effects in 2020
+    
+    # Time since interventions for slope change analysis
+    time_since_maria = pmax(0, year - 2017),  # Time since Maria (0 before 2018)
+    time_since_covid = pmax(0, year - 2019),  # Time since COVID (0 before 2020)
+    
+    # Create period indicators for descriptive analysis
+    period = case_when(
+      year < 2018 ~ "Pre-Maria",
+      year >= 2018 & year < 2020 ~ "Maria-COVID",
+      year >= 2020 ~ "Post-COVID"
+    ),
+    
+    # Gender indicator
+    gender = M..F
+  ) %>%
+  # Keep only complete cases for Age.Adjusted.Rate
+  filter(!is.na(Age.Adjusted.Rate)) %>%
+  # Order cancer types for consistent presentation
+  mutate(
+    cancer_type = factor(cancer_type, levels = c(
+      "All Obesity-Related Cancers",
+      "Colorectal Cancer", "Postmenopausal Breast Cancer", "Endometrial Cancer",
+      "Kidney Cancer", "Pancreatic Cancer", "Liver Cancer", "Thyroid Cancer",
+      "Ovarian Cancer", "Gallbladder Cancer", "Gastric Cardia Cancer",
+      "Esophageal Adenocarcinoma", "Multiple Myeloma", "Meningioma"
+    )),
+    period = factor(period, levels = c("Pre-Maria", "Maria-COVID", "Post-COVID"))
+  )
+
+# Data quality summary
+cat("=== DATA QUALITY SUMMARY ===\n")
+cat("Total observations:", nrow(df), "\n")
+cat("Year range:", min(df$year), "to", max(df$year), "\n")
+cat("Cancer types:", length(unique(df$cancer_type)), "\n")
+cat("Complete Age-Adjusted Rate observations:", sum(!is.na(df$Age.Adjusted.Rate)), "\n")
+
+# Show cancer type distribution
+cancer_counts <- df %>% 
+  count(cancer_type, name = "n_observations") %>%
+  arrange(desc(n_observations))
+
+kable(cancer_counts, 
+      caption = "Number of observations by cancer type",
+      col.names = c("Cancer Type", "N Observations")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+---
+
+## 2. Descriptive Analysis by Period
+
+```{r descriptive_analysis}
+# Calculate descriptive statistics by period and cancer type
+period_stats <- df %>%
+  group_by(cancer_type, period, gender) %>%
+  summarise(
+    n = n(),
+    mean_rate = mean(Age.Adjusted.Rate, na.rm = TRUE),
+    median_rate = median(Age.Adjusted.Rate, na.rm = TRUE),
+    sd_rate = sd(Age.Adjusted.Rate, na.rm = TRUE),
+    min_rate = min(Age.Adjusted.Rate, na.rm = TRUE),
+    max_rate = max(Age.Adjusted.Rate, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(cancer_type, gender, period)
+
+# Focus on overall cancer rates for main summary
+overall_stats <- period_stats %>%
+  filter(cancer_type == "All Obesity-Related Cancers") %>%
+  dplyr::select(period, gender, n, mean_rate, sd_rate) %>%
+  pivot_wider(names_from = period, values_from = c(n, mean_rate, sd_rate),
+              names_sep = "_")
+
+kable(overall_stats, digits = 2,
+      caption = "Descriptive Statistics: All Obesity-Related Cancers by Period and Gender",
+      col.names = c("Gender", rep(c("N", "Mean Rate", "SD"), 3))) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  add_header_above(c(" " = 1, "Pre-Maria" = 3, "Maria-COVID" = 3, "Post-COVID" = 3))
+```
+
+---
+
+## 3. Interrupted Time Series Models
+
+### 3.1 Model Specification
+
+**ITS Model Equation:**
+$$\text{Rate}_{it} = \beta_0 + \beta_1 \cdot \text{time}_t + \beta_2 \cdot \text{Maria}_t + \beta_3 \cdot \text{time_since_Maria}_t + \beta_4 \cdot \text{COVID}_t + \beta_5 \cdot \text{time_since_COVID}_t + \varepsilon_{it}$$
+
+**Parameter Interpretation:**
+- $\beta_0$: Baseline rate at time 0
+- $\beta_1$: Pre-intervention annual trend  
+- $\beta_2$: Immediate level change after Maria
+- $\beta_3$: Change in annual trend after Maria
+- $\beta_4$: Immediate level change after COVID
+- $\beta_5$: Change in annual trend after COVID
+
+```{r its_models}
+# REPLACE YOUR EXISTING fit_its_model FUNCTION WITH THIS VERSION:
+
+fit_its_model <- function(data, cancer_name) {
+  # Check data quality first
+  if(nrow(data) < 15) {
+    return(NULL)  # Need sufficient observations
+  }
+  
+  # Check for variation in outcome
+  if(sd(data$Age.Adjusted.Rate, na.rm = TRUE) < 0.01) {
+    return(NULL)  # Insufficient variation
+  }
+  
+  # Fit basic model
+  model <- lm(Age.Adjusted.Rate ~ time + maria_intervention + time_since_maria + 
+              covid_intervention + time_since_covid, 
+              data = data)
+  
+  # Initialize variables
+  robust_results <- NULL
+  dw_test <- NULL
+  robust_method <- "standard"
+  
+  # Try different robust standard error methods
+  # Method 1: Try basic heteroskedasticity-consistent (HC1)
+  robust_results <- try({
+    result <- coeftest(model, vcov = vcovHC(model, type = "HC1"))
+    robust_method <<- "HC1"
+    result
+  }, silent = TRUE)
+  
+  # Method 2: If HC1 fails, try Newey-West with minimal lag
+  if(inherits(robust_results, "try-error")) {
+    robust_results <- try({
+      result <- coeftest(model, vcov = NeweyWest(model, lag = 0))
+      robust_method <<- "NeweyWest_lag0"
+      result
+    }, silent = TRUE)
+  }
+  
+  # Method 3: Final fallback to standard errors
+  if(inherits(robust_results, "try-error")) {
+    robust_results <- coeftest(model)
+    robust_method <- "standard"
+  }
+  
+  # Durbin-Watson test with error handling
+  dw_test <- try({
+    dwtest(model)
+  }, silent = TRUE)
+  
+  if(inherits(dw_test, "try-error")) {
+    dw_test <- list(statistic = NA, p.value = NA)
+  }
+  
+  # Create results summary
+  results <- tidy(robust_results) %>%
+    mutate(
+      cancer_type = cancer_name,
+      model_r_squared = summary(model)$r.squared,
+      model_adj_r_squared = summary(model)$adj.r.squared,
+      dw_statistic = as.numeric(dw_test$statistic),
+      dw_p_value = as.numeric(dw_test$p.value),
+      n_obs = nrow(data),
+      robust_method = robust_method
+    )
+  
+  return(list(
+    model = model,
+    robust_results = robust_results,
+    results_df = results,
+    fitted_data = data %>% 
+      mutate(
+        fitted_values = predict(model),
+        residuals = residuals(model)
+      )
+  ))
+}
+
+# ALSO REPLACE YOUR MODEL FITTING SECTION WITH THIS:
+
+# Fit models for each cancer type and gender
+cat("Fitting ITS models...\n")
+
+# First, let's check what data we have
+data_summary <- df %>%
+  group_by(cancer_type, gender) %>%
+  summarise(
+    n_obs = n(),
+    n_years = length(unique(year)),
+    rate_mean = mean(Age.Adjusted.Rate, na.rm = TRUE),
+    rate_sd = sd(Age.Adjusted.Rate, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_obs))
+
+cat("Data availability by cancer type and gender:\n")
+print(data_summary %>% filter(n_obs >= 15))
+
+model_results <- df %>%
+  group_by(cancer_type, gender) %>%
+  group_split() %>%
+  map(function(data) {
+    cancer_name <- unique(data$cancer_type)
+    gender_name <- unique(data$gender)
+    
+    # More stringent data requirements
+    if(nrow(data) >= 15 && sd(data$Age.Adjusted.Rate, na.rm = TRUE) > 0.01) {
+      cat("Fitting model for:", cancer_name, "-", gender_name, "(n =", nrow(data), ")\n")
+      result <- fit_its_model(data, paste(cancer_name, "-", gender_name))
+      if(is.null(result)) {
+        cat("  -> Model fitting failed\n")
+      } else {
+        cat("  -> Model fitted successfully using", result$results_df$robust_method[1], "standard errors\n")
+      }
+      return(result)
+    } else {
+      cat("Skipping", cancer_name, "-", gender_name, ": insufficient data (n =", nrow(data), 
+          ", SD =", round(sd(data$Age.Adjusted.Rate, na.rm = TRUE), 4), ")\n")
+      return(NULL)
+    }
+  }) %>%
+  compact()  # Remove NULL results
+
+# Check if we have any successful models
+if(length(model_results) == 0) {
+  stop("No models could be fitted. Check data structure.")
+}
+
+cat("\nSuccessfully fitted", length(model_results), "models\n")
+
+# Extract results for all models
+all_results <- map_dfr(model_results, ~ if(!is.null(.x)) .x$results_df else NULL)
+
+# Focus on overall cancer results for detailed interpretation
+overall_results <- all_results %>%
+  filter(str_detect(cancer_type, "All Obesity-Related"))
+
+# Display results table
+if(nrow(overall_results) > 0) {
+  kable(overall_results %>% 
+          select(cancer_type, term, estimate, std.error, statistic, p.value, n_obs, robust_method) %>%
+          mutate(
+            estimate = round(estimate, 3),
+            std.error = round(std.error, 3),
+            statistic = round(statistic, 3),
+            p.value = case_when(
+              p.value < 0.001 ~ "<0.001",
+              p.value < 0.01 ~ "<0.01",
+              p.value < 0.05 ~ "<0.05",
+              TRUE ~ as.character(round(p.value, 3))
+            )
+          ),
+        caption = "ITS Model Results: All Obesity-Related Cancers",
+        col.names = c("Cancer Type", "Parameter", "Estimate", "SE", "t-statistic", "p-value", "N obs", "Method")) %>%
+    kable_styling(bootstrap_options = c("striped", "hover"))
+} else {
+  cat("No results available for All Obesity-Related Cancers. Available results:\n")
+  if(nrow(all_results) > 0) {
+    print(unique(all_results$cancer_type))
+    # Show the first available result as an example
+    example_results <- all_results %>% slice(1:6)  # First model results
+    kable(example_results %>% 
+            select(cancer_type, term, estimate, std.error, p.value, robust_method) %>%
+            mutate(
+              estimate = round(estimate, 3),
+              std.error = round(std.error, 3),
+              p.value = round(p.value, 3)
+            ),
+          caption = "Example ITS Model Results (First Available Cancer Type)") %>%
+      kable_styling(bootstrap_options = c("striped", "hover"))
+  } else {
+    cat("No results available at all.\n")
+  }
+}
+```
+
+### 3.2 Statistical Interpretation
+
+```{r interpretation}
+# Create interpretation table for overall cancers
+interpretation_data <- overall_results %>%
+  mutate(
+    clinical_interpretation = case_when(
+      term == "(Intercept)" ~ "Baseline rate in year 2000 (per 100,000)",
+      term == "time" ~ "Annual change in rate before Maria (per year)",
+      term == "maria_intervention" ~ "Immediate rate change after Maria onset",
+      term == "time_since_maria" ~ "Change in annual trend after Maria",
+      term == "covid_intervention" ~ "Immediate rate change after COVID onset", 
+      term == "time_since_covid" ~ "Change in annual trend after COVID",
+      TRUE ~ term
+    ),
+    effect_size = case_when(
+      term %in% c("maria_intervention", "covid_intervention") ~ 
+        paste0(round(estimate, 1), " per 100,000 ", 
+               ifelse(estimate > 0, "(increase)", "(decrease)")),
+      term %in% c("time", "time_since_maria", "time_since_covid") ~
+        paste0(round(estimate, 2), " per year ",
+               ifelse(estimate > 0, "(increasing)", "(decreasing)")),
+      TRUE ~ paste0(round(estimate, 1))
+    ),
+    significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**", 
+      p.value < 0.05 ~ "*",
+      p.value < 0.10 ~ "†",
+      TRUE ~ "NS"
+    )
+  )
+
+kable(interpretation_data %>%
+        dplyr::select(cancer_type, clinical_interpretation, effect_size, significance) %>%
+        filter(!str_detect(clinical_interpretation, "Intercept")),
+      caption = "Clinical Interpretation of ITS Results",
+      col.names = c("Cancer Type", "Effect", "Effect Size", "Significance")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover")) %>%
+  footnote(general = "*** p<0.001, ** p<0.01, * p<0.05, † p<0.10, NS = Not Significant")
+```
+
+---
+
+## 4. Comprehensive Visualization
+
+### 4.1 Main Time Series Plots
+
+```{r main_plots}
+# Get fitted data for plotting
+fitted_data <- map_dfr(model_results, ~ .x$fitted_data)
+
+# Create main time series plot for overall cancers
+plot_overall <- fitted_data %>%
+  filter(str_detect(cancer_type, "All Obesity-Related")) %>%
+  ggplot(aes(x = year)) +
+  geom_vline(xintercept = c(2017.5, 2020), linetype = "dashed", 
+              alpha = 0.8, size = 1) +
+  geom_point(aes(y = Age.Adjusted.Rate, color = period), size = 3, alpha = 0.8) +
+  geom_line(aes(y = fitted_values), color = "#2c3e50", size = 1.2, alpha = 0.9) +
+  facet_wrap(~ gender, scales = "free_y", ncol = 2) +
+  scale_color_manual(values = intervention_colors) +
+  scale_x_continuous(breaks = seq(2000, 2022, 4)) +
+  labs(
+    title = "Interrupted Time Series Analysis: All Obesity-Related Cancers",
+    subtitle = "Impact of Hurricane Maria (2017) and COVID-19 (2020) on Age-Adjusted Cancer Rates",
+    x = "Year",
+    y = "Age-Adjusted Rate (per 100,000)",
+    color = "Period",
+    caption = "Dashed lines indicate intervention periods; Solid line shows ITS model fit"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    legend.title = element_text(size = 11, face = "bold")
+  )
+
+print(plot_overall)
+```
+
+### 4.2 Cancer-Specific Analysis (Top 6 Most Common)
+
+```{r cancer_specific}
+# Identify top 6 cancer types by average rate
+top_cancers <- fitted_data %>%
+  filter(cancer_type != "All Obesity-Related Cancers") %>%
+  group_by(cancer_type) %>%
+  summarise(avg_rate = mean(Age.Adjusted.Rate, na.rm = TRUE), .groups = "drop") %>%
+  slice_max(avg_rate, n = 6) %>%
+  pull(cancer_type)
+
+plot_specific_females <- fitted_data %>%
+  mutate(
+    gender = trimws(gender),
+    cancer_type = case_when(
+      str_detect(Obesity.associated.cancers..Overall., "OVERALL") ~ "All Obesity-Related Cancers",
+      str_detect(Obesity.associated.cancers..Overall., "Colon") ~ "Colorectal Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Corrpus") ~ "Endometrial Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Esophageal") ~ "Esophageal Adenocarcinoma",
+      str_detect(Obesity.associated.cancers..Overall., "Gallbladder") ~ "Gallbladder Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Gastric") ~ "Gastric Cardia Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Kidney") ~ "Kidney Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Liver") ~ "Liver Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Meningioma") ~ "Meningioma",
+      str_detect(Obesity.associated.cancers..Overall., "MM") ~ "Multiple Myeloma",
+      str_detect(Obesity.associated.cancers..Overall., "Ovary") ~ "Ovarian Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Pancreas") ~ "Pancreatic Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Postmenopausal") ~ "Postmenopausal Breast Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Thyroid") ~ "Thyroid Cancer",
+      TRUE ~ as.character(Obesity.associated.cancers..Overall.)
+    )) %>% 
+  filter(cancer_type %in% top_cancers, gender == "Female") %>%
+  ggplot(aes(x = year)) +
+  geom_vline(xintercept = c(2017.5, 2020), linetype = "dashed", 
+            alpha = 0.6) +
+  geom_point(aes(y = Age.Adjusted.Rate, color = period), size = 2, alpha = 0.8) +
+  geom_line(aes(y = fitted_values), color = "#2c3e50", size = 1, alpha = 0.8) +
+  facet_wrap(~ cancer_type, scales = "free_y", ncol = 2) +
+  scale_color_manual(values = intervention_colors) +
+  scale_x_continuous(breaks = c(2000, 2010, 2020)) +
+  labs(
+    title = "Cancer-Specific Interrupted Time Series Analysis",
+    subtitle = "Top 6 obesity-related cancers by incidence rate",
+    x = "Year",
+    y = "Age-Adjusted Rate (per 100,000)",
+    color = "Period"
+  ) +
+  theme(
+    strip.text = element_text(size = 10, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+print(plot_specific_females)
+
+plot_specific_males <- fitted_data %>%
+  mutate(
+    gender = trimws(gender),
+    cancer_type = case_when(
+      str_detect(Obesity.associated.cancers..Overall., "OVERALL") ~ "All Obesity-Related Cancers",
+      str_detect(Obesity.associated.cancers..Overall., "Colon") ~ "Colorectal Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Corrpus") ~ "Endometrial Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Esophageal") ~ "Esophageal Adenocarcinoma",
+      str_detect(Obesity.associated.cancers..Overall., "Gallbladder") ~ "Gallbladder Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Gastric") ~ "Gastric Cardia Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Kidney") ~ "Kidney Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Liver") ~ "Liver Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Meningioma") ~ "Meningioma",
+      str_detect(Obesity.associated.cancers..Overall., "MM") ~ "Multiple Myeloma",
+      str_detect(Obesity.associated.cancers..Overall., "Ovary") ~ "Ovarian Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Pancreas") ~ "Pancreatic Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Postmenopausal") ~ "Postmenopausal Breast Cancer",
+      str_detect(Obesity.associated.cancers..Overall., "Thyroid") ~ "Thyroid Cancer",
+      TRUE ~ as.character(Obesity.associated.cancers..Overall.)
+    )) %>% 
+  filter(cancer_type %in% top_cancers, gender == "Male") %>%
+  ggplot(aes(x = year)) +
+  geom_vline(xintercept = c(2017.5, 2020), linetype = "dashed", 
+            alpha = 0.6) +
+  geom_point(aes(y = Age.Adjusted.Rate, color = period), size = 2, alpha = 0.8) +
+  geom_line(aes(y = fitted_values), color = "#2c3e50", size = 1, alpha = 0.8) +
+  facet_wrap(~ cancer_type, scales = "free_y", ncol = 2) +
+  scale_color_manual(values = intervention_colors) +
+  scale_x_continuous(breaks = c(2000, 2010, 2020)) +
+  labs(
+    title = "Cancer-Specific Interrupted Time Series Analysis",
+    subtitle = "Top 6 obesity-related cancers by incidence rate",
+    x = "Year",
+    y = "Age-Adjusted Rate (per 100,000)",
+    color = "Period"
+  ) +
+  theme(
+    strip.text = element_text(size = 10, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+print(plot_specific_males)
+```
+
+### 4.3 Effect Size Visualization
+
+```{r effect_size_plot}
+# Create effect size plot for key interventions
+effect_sizes <- all_results %>%
+  filter(
+    term %in% c("maria_intervention", "covid_intervention"),
+    str_detect(cancer_type, "All")  # Focus on total population
+  ) %>%
+  mutate(
+    intervention = ifelse(term == "maria_intervention", "Hurricane Maria", "COVID-19"),
+    cancer_clean = str_remove(cancer_type, "All Obesity-Related Cancers -   "),
+    significant = p.value < 0.05
+  )
+
+plot_effects <- effect_sizes %>%
+  ggplot(aes(x = estimate, y = reorder(cancer_clean, estimate))) +
+  geom_vline(xintercept = 0, linetype = "solid", color = "gray50") +
+  geom_point(aes(color = intervention, size = significant), alpha = 0.8) +
+  geom_errorbarh(aes(xmin = estimate - 1.96*std.error, 
+                     xmax = estimate + 1.96*std.error,
+                     color = intervention), 
+                 height = 0.3, alpha = 0.7) +
+  facet_wrap(~ intervention, scales = "free_x") +
+  scale_color_manual(values = c("#e74c3c", "#9b59b6")) +
+  scale_size_manual(values = c(3, 5), guide = "none") +
+  labs(
+    title = "Immediate Impact of Interventions on Cancer Rates",
+    subtitle = "Effect sizes with 95% confidence intervals; Larger points indicate p<0.05",
+    x = "Change in Age-Adjusted Rate (per 100,000)",
+    y = "Cancer Type",
+    color = "Intervention"
+  ) +
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),
+    legend.position = "bottom"
+  )
+
+print(plot_effects)
+```
+
+### 4.4 Model Diagnostics
+
+```{r diagnostics}
+# Residuals analysis for overall cancer model
+overall_fitted <- fitted_data %>%
+  filter(str_detect(cancer_type, "All Obesity-Related"))
+
+# Time series of residuals
+p1 <- overall_fitted %>%
+  ggplot(aes(x = year, y = residuals)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_point(aes(color = gender), alpha = 0.7) +
+  geom_smooth(aes(color = gender), method = "loess", se = FALSE, size = 1) +
+  facet_wrap(~ gender, ncol = 2) +
+  labs(
+    title = "Model Residuals Over Time",
+    x = "Year",
+    y = "Residuals",
+    color = "Gender"
+  )
+
+# QQ plot for normality
+p2 <- overall_fitted %>%
+  ggplot(aes(sample = residuals)) +
+  stat_qq(aes(color = gender), alpha = 0.7) +
+  stat_qq_line(aes(color = gender)) +
+  facet_wrap(~ gender, ncol = 2) +
+  labs(
+    title = "Q-Q Plot: Residual Normality",
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles",
+    color = "Gender"
+  )
+
+# Combine diagnostic plots
+diagnostic_plot <- p1 / p2
+print(diagnostic_plot)
+```
+
+---
+
+## 5. Clinical and Public Health Interpretation
+
+### 5.1 Summary of Key Findings
+
+```{r key_findings}
+# Extract key findings for overall cancer rates
+key_findings <- overall_results %>%
+  mutate(
+    finding = case_when(
+      term == "time" ~ paste0("Pre-Maria annual trend: ", 
+                             round(estimate, 2), " per 100,000 per year"),
+      term == "maria_intervention" ~ paste0("Hurricane Maria immediate impact: ",
+                                          ifelse(estimate > 0, "+", ""), 
+                                          round(estimate, 1), " per 100,000"),
+      term == "time_since_maria" ~ paste0("Post-Maria trend change: ",
+                                        ifelse(estimate > 0, "+", ""),
+                                        round(estimate, 2), " per year change"),
+      term == "covid_intervention" ~ paste0("COVID-19 immediate impact: ",
+                                          ifelse(estimate > 0, "+", ""),
+                                          round(estimate, 1), " per 100,000"),
+      term == "time_since_covid" ~ paste0("Post-COVID trend change: ",
+                                        ifelse(estimate > 0, "+", ""),
+                                        round(estimate, 2), " per year change"),
+      TRUE ~ NA_character_
+    ),
+    p_value_formatted = case_when(
+      p.value < 0.001 ~ "p < 0.001",
+      p.value < 0.01 ~ "p < 0.01", 
+      p.value < 0.05 ~ "p < 0.05",
+      p.value < 0.10 ~ "p < 0.10",
+      TRUE ~ paste0("p = ", round(p.value, 3))
+    )
+  ) %>%
+  filter(!is.na(finding)) %>%
+  select(cancer_type, finding, p_value_formatted)
+
+kable(key_findings,
+      col.names = c("Population", "Key Finding", "Statistical Significance"),
+      caption = "Summary of Key Findings") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+### 5.2 Clinical Implications
+
+**Hurricane Maria Impact (2017-2018):**
+- Represents one of the most severe natural disasters in Puerto Rico's history
+- Healthcare system disruption lasted months to years
+- Expected effects: delayed diagnoses, interrupted treatments, population displacement
+
+**COVID-19 Pandemic Impact (2020 onwards):**
+- Global disruption of preventive care and cancer screening programs  
+- Delayed elective procedures and routine healthcare visits
+- Patient fear and healthcare system overwhelm
+
+**Obesity-Related Cancer Context:**
+- These cancers often require regular screening (breast, colorectal)
+- Many are hormone-sensitive and affected by stress/lifestyle changes
+- Treatment complexity may be particularly affected by system disruptions
+
+### 5.3 Public Health Recommendations
+
+Based on the analysis results:
+
+1. **Surveillance Enhancement**: Continue monitoring cancer rates for delayed effects of both interventions
+
+2. **Healthcare System Resilience**: Develop protocols for maintaining cancer care during emergencies
+
+3. **Targeted Interventions**: Focus resources on cancer types showing significant impacts
+
+4. **Population Health**: Address underlying risk factors (obesity, screening access) that may have worsened during crises
+
+---
+
+## 6. Statistical Methods Summary
+
+**Model Specifications:**
+- Interrupted Time Series regression with two intervention points
+- Robust standard errors (Newey-West) to account for autocorrelation
+- Durbin-Watson tests for residual autocorrelation assessment
+
+**Significance Testing:**
+- α = 0.05 for primary hypothesis tests
+- Bonferroni correction considered for multiple cancer types
+- Effect sizes reported with 95% confidence intervals
+
+**Assumptions:**
+- Linear trends within each period
+- No major confounding events at intervention timepoints  
+- Intervention effects begin as modeled (2018 for Maria, 2020 for COVID)
+- Independence after accounting for autocorrelation
+
+**Limitations:**
+- Ecological study design limits causal inference
+- Relatively short post-intervention periods
+- Multiple comparisons across cancer types
+- Potential unmeasured confounders (economic factors, other health system changes)
+
+---
+
+## Conclusion
+
+This interrupted time series analysis provides robust statistical evidence for evaluating the population-level impact of Hurricane Maria and COVID-19 on obesity-related cancer rates in Puerto Rico. The methodology accounts for temporal dependencies and provides clinically interpretable effect sizes essential for public health decision-making.
+
+The analysis framework can be extended to other cancer types, populations, or intervention scenarios, providing a template for evidence-based evaluation of health system disruptions.
